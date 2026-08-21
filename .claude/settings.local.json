@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(node -e ' *)",
+      "Bash(echo \"exit: $?\")",
+      "WebFetch(domain:developers.cresva.ai)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}
