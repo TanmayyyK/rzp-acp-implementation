@@ -133,11 +133,27 @@ async function fetchOrder(razorpayOrderId) {
   return withRetry(() => rz.orders.fetch(razorpayOrderId));
 }
 
+// ---------------------------------------------------------------------------
+// cancelPaymentLink — POST /v1/payment_links/{id}/cancel
+// ---------------------------------------------------------------------------
+
+/**
+ * Cancel a Razorpay Payment Link that has not yet been paid.
+ *
+ * @param {string} paymentLinkId
+ * @returns {Promise<object>}
+ */
+async function cancelPaymentLink(paymentLinkId) {
+  const rz = getInstance();
+  return withRetry(() => rz.paymentLink.cancel(paymentLinkId));
+}
+
 module.exports = {
   getInstance,
   createOrder,
   createPaymentLink,
   fetchOrder,
+  cancelPaymentLink,
   // Exported for testing
   _withRetry: withRetry,
 };

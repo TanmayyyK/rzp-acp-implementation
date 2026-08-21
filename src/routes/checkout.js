@@ -20,8 +20,10 @@
 const crypto = require('crypto');
 const express = require('express');
 const { getMockProductFeed } = require('../lib/mockProductFeed');
+const { createIdempotencyWrapper } = require('../lib/razorpayIdempotencyWrapper');
 
 const router = express.Router();
+const rzpIdempotency = createIdempotencyWrapper();
 
 // ─── In-memory session store ────────────────────────────────────────────
 const sessions = new Map();
@@ -351,59 +353,75 @@ router.post('/sessions/:id/complete', async (req, res) => {
         `Expected PaymentMandate, got ${payment_mandate.type}`, false, session.sessionId);
     }
 
-    // --- Day 4: Call live Razorpay API ---
+    // --- Day 4: Call live Razorpay API via Idempotency Wrapper ---
     const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
     const razorpayClient = require('../lib/razorpayClient');
 
     session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
-    session.state = 'CONFIRMED';
     session.updatedAt = now();
 
-    if (session.amount <= autoApproveThreshold) {
-      // Auto-approved path: POST /v1/orders
-      const rzpOrder = await razorpayClient.createOrder({
-        amount: session.amount,
-        currency: session.currency,
-        receipt: session.orderId,
-        notes: { session_id: session.sessionId },
-      });
+    try {
+      if (session.amount <= autoApproveThreshold) {
+        // Auto-approved path: POST /v1/orders
+        const rzpOrder = await rzpIdempotency.execute(idempotencyKey, () =>
+          razorpayClient.createOrder({
+            amount: session.amount,
+            currency: session.currency,
+            receipt: session.orderId,
+            notes: { session_id: session.sessionId },
+          })
+        );
 
-      session.razorpayOrderId = rzpOrder.id;
-      console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId} -> ${rzpOrder.id}`);
+        session.state = 'CONFIRMED';
+        session.razorpayOrderId = rzpOrder.id;
+        console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId} -> ${rzpOrder.id}`);
 
-      return res.status(200).json({
-        session_id: session.sessionId,
-        state: 'CONFIRMED',
-        order: {
-          order_id: session.orderId,
-          razorpay_order_id: rzpOrder.id,
-        },
-        payment_mandate_id: session.paymentMandateId,
-        next: 'await_webhook',
-      });
-    } else {
-      // Escalated path: POST /v1/payment_links
-      const plink = await razorpayClient.createPaymentLink({
-        amount: session.amount,
-        currency: session.currency,
-        description: `Order ${session.orderId}`,
-        receipt: session.orderId,
-        notes: { session_id: session.sessionId },
-      });
+        return res.status(200).json({
+          session_id: session.sessionId,
+          state: 'CONFIRMED',
+          order: {
+            order_id: session.orderId,
+            razorpay_order_id: rzpOrder.id,
+          },
+          payment_mandate_id: session.paymentMandateId,
+          next: 'await_webhook',
+        });
+      } else {
+        // Escalated path: POST /v1/payment_links
+        const plink = await rzpIdempotency.execute(idempotencyKey, () =>
+          razorpayClient.createPaymentLink({
+            amount: session.amount,
+            currency: session.currency,
+            description: `Order ${session.orderId}`,
+            receipt: session.orderId,
+            notes: { session_id: session.sessionId },
+          })
+        );
 
-      session.razorpayPaymentLinkId = plink.id;
-      console.log(`[Checkout] Session completed (escalated): ${session.sessionId} -> ${plink.id}`);
+        session.state = 'CONFIRMED';
+        session.razorpayPaymentLinkId = plink.id;
+        console.log(`[Checkout] Session completed (escalated): ${session.sessionId} -> ${plink.id}`);
 
-      return res.status(202).json({
-        session_id: session.sessionId,
-        state: 'CONFIRMED',
-        approval: {
-          type: 'payment_link',
-          url: plink.short_url,
-          payment_link_id: plink.id,
-        },
-        next: 'await_human_then_webhook',
-      });
+        return res.status(202).json({
+          session_id: session.sessionId,
+          state: 'CONFIRMED',
+          approval: {
+            type: 'payment_link',
+            url: plink.short_url,
+            payment_link_id: plink.id,
+          },
+          next: 'await_human_then_webhook',
+        });
+      }
+    } catch (err) {
+      if (err.name === 'IdempotencyKeyError') {
+        return errorResponse(res, 400, 'INVALID_IDEMPOTENCY_KEY', err.message, false, session.sessionId);
+      }
+      if (err.name === 'RazorpayRequestError') {
+        // If it's a retryable network error, instruct the agent to backoff and retry
+        return errorResponse(res, 502, 'UPSTREAM_API_ERROR', err.message, err.retryable, session.sessionId);
+      }
+      throw err;
     }
   } catch (err) {
     console.error('[Checkout] Complete session error:', err);
@@ -416,37 +434,57 @@ router.post('/sessions/:id/complete', async (req, res) => {
 //    POST /api/v1/checkout/sessions/:id/cancel
 // ═══════════════════════════════════════════════════════════════════════
 
-router.post('/sessions/:id/cancel', (req, res) => {
-  const session = sessions.get(req.params.id);
+router.post('/sessions/:id/cancel', async (req, res) => {
+  try {
+    const session = sessions.get(req.params.id);
 
-  if (!session) {
-    return errorResponse(res, 404, 'SESSION_NOT_FOUND',
-      `No session with id ${req.params.id}`, false, req.params.id);
+    if (!session) {
+      return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+        `No session with id ${req.params.id}`, false, req.params.id);
+    }
+
+    if (session.state === 'CANCELLED') {
+      return errorResponse(res, 409, 'ALREADY_CANCELLED',
+        'Session is already cancelled', false, session.sessionId);
+    }
+
+    if (session.state === 'PAID' || session.state === 'COMPLETED') {
+      return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+        `Cannot cancel session in state ${session.state}`, false, session.sessionId);
+    }
+
+    // Attempt to void any live payment links
+    if (session.razorpayPaymentLinkId) {
+      const razorpayClient = require('../lib/razorpayClient');
+      try {
+        await razorpayClient.cancelPaymentLink(session.razorpayPaymentLinkId);
+        console.log(`[Checkout] Voided Razorpay Payment Link: ${session.razorpayPaymentLinkId}`);
+      } catch (err) {
+        // If it's already paid or cancelled on Razorpay's end, ignore the 400
+        const statusCode = err.statusCode || err.status;
+        if (statusCode !== 400) {
+          console.error('[Checkout] Failed to cancel payment link:', err);
+        }
+      }
+    }
+
+    session.state = 'CANCELLED';
+    session.updatedAt = now();
+
+    console.log(`[Checkout] Session cancelled: ${session.sessionId}`);
+
+    return res.json({
+      session_id: session.sessionId,
+      state: 'CANCELLED',
+      razorpay: {
+        order_id: session.razorpayOrderId,
+        status: session.razorpayOrderId || session.razorpayPaymentLinkId ? 'cancelled' : 'not_created',
+      },
+    });
+  } catch (err) {
+    console.error('[Checkout] Cancel session error:', err);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to cancel checkout session');
   }
-
-  if (session.state === 'CANCELLED') {
-    return errorResponse(res, 409, 'ALREADY_CANCELLED',
-      'Session is already cancelled', false, session.sessionId);
-  }
-
-  if (session.state === 'PAID' || session.state === 'COMPLETED') {
-    return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
-      `Cannot cancel session in state ${session.state}`, false, session.sessionId);
-  }
-
-  session.state = 'CANCELLED';
-  session.updatedAt = now();
-
-  console.log(`[Checkout] Session cancelled: ${session.sessionId}`);
-
-  return res.json({
-    session_id: session.sessionId,
-    state: 'CANCELLED',
-    razorpay: {
-      order_id: session.razorpayOrderId,
-      status: session.razorpayOrderId ? 'cancelled' : 'not_created',
-    },
-  });
 });
 
 // Exported for testing — allows tests to inspect/clear sessions

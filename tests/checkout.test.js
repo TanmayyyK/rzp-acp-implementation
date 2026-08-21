@@ -8,6 +8,7 @@ const checkoutRouter = require('../src/routes/checkout');
 jest.mock('../src/lib/razorpayClient', () => ({
   createOrder: jest.fn(async (params) => ({ id: 'order_simulated_mock', ...params })),
   createPaymentLink: jest.fn(async (params) => ({ id: 'plink_simulated_mock', short_url: 'https://rzp.io/i/plink_simulated_mock', ...params })),
+  cancelPaymentLink: jest.fn(async (id) => ({ id, status: 'cancelled' })),
 }));
 
 // Clear the in-memory session store between tests

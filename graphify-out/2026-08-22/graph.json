@@ -4,47 +4,11 @@
   "graph": {},
   "nodes": [
     {
-      "id": "tests_checkout_test_createsession",
-      "label": "createSession()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "checkout.test.js",
-      "file_type": "code",
-      "norm_label": "createsession()",
-      "source_file": "tests/checkout.test.js",
-      "source_location": "L56"
-    },
-    {
-      "id": "tests_checkout_test_stubintentmandate",
-      "label": "stubIntentMandate()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "checkout.test.js",
-      "file_type": "code",
-      "norm_label": "stubintentmandate()",
-      "source_file": "tests/checkout.test.js",
-      "source_location": "L20"
-    },
-    {
-      "id": "tests_checkout_test_stubpaymentmandate",
-      "label": "stubPaymentMandate()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 10,
-      "community_name": "checkout.test.js",
-      "file_type": "code",
-      "norm_label": "stubpaymentmandate()",
-      "source_file": "tests/checkout.test.js",
-      "source_location": "L38"
-    },
-    {
       "id": "src_lib_razorpayclient_createorder",
       "label": "createOrder()",
       "_callable": true,
       "_origin": "ast",
-      "community": 13,
+      "community": 1,
       "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "createorder()",
@@ -56,7 +20,7 @@
       "label": "createPaymentLink()",
       "_callable": true,
       "_origin": "ast",
-      "community": 13,
+      "community": 1,
       "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "createpaymentlink()",
@@ -68,7 +32,7 @@
       "label": "fetchOrder()",
       "_callable": true,
       "_origin": "ast",
-      "community": 13,
+      "community": 1,
       "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "fetchorder()",
@@ -80,7 +44,7 @@
       "label": "getInstance()",
       "_callable": true,
       "_origin": "ast",
-      "community": 13,
+      "community": 1,
       "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "getinstance()",
@@ -92,12 +56,60 @@
       "label": "withRetry()",
       "_callable": true,
       "_origin": "ast",
-      "community": 13,
+      "community": 1,
       "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "withretry()",
       "source_file": "src/lib/razorpayClient.js",
       "source_location": "L40"
+    },
+    {
+      "id": "tests_checkout_test_createsession",
+      "label": "createSession()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 10,
+      "community_name": "checkout.test.js",
+      "file_type": "code",
+      "norm_label": "createsession()",
+      "source_file": "tests/checkout.test.js",
+      "source_location": "L50"
+    },
+    {
+      "id": "tests_checkout_test_stubintentmandate",
+      "label": "stubIntentMandate()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 10,
+      "community_name": "checkout.test.js",
+      "file_type": "code",
+      "norm_label": "stubintentmandate()",
+      "source_file": "tests/checkout.test.js",
+      "source_location": "L14"
+    },
+    {
+      "id": "tests_checkout_test_stubpaymentmandate",
+      "label": "stubPaymentMandate()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 10,
+      "community_name": "checkout.test.js",
+      "file_type": "code",
+      "norm_label": "stubpaymentmandate()",
+      "source_file": "tests/checkout.test.js",
+      "source_location": "L32"
+    },
+    {
+      "id": "src_routes_checkout_attachsessionroutes",
+      "label": "attachSessionRoutes()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "attachsessionroutes()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L449"
     },
     {
       "id": "src_routes_checkout_buildstubmandate",
@@ -109,7 +121,43 @@
       "file_type": "code",
       "norm_label": "buildstubmandate()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L89"
+      "source_location": "L96"
+    },
+    {
+      "id": "src_routes_checkout_cancelcheckout",
+      "label": "cancelCheckout()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "cancelcheckout()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L411"
+    },
+    {
+      "id": "src_routes_checkout_completecheckout",
+      "label": "completeCheckout()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "completecheckout()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L324"
+    },
+    {
+      "id": "src_routes_checkout_createsession",
+      "label": "createSession()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "createsession()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L158"
     },
     {
       "id": "src_routes_checkout_errorresponse",
@@ -121,7 +169,7 @@
       "file_type": "code",
       "norm_label": "errorresponse()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L140"
+      "source_location": "L147"
     },
     {
       "id": "src_routes_checkout_expiresin",
@@ -133,7 +181,7 @@
       "file_type": "code",
       "norm_label": "expiresin()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L39"
+      "source_location": "L46"
     },
     {
       "id": "src_routes_checkout_generateid",
@@ -145,7 +193,19 @@
       "file_type": "code",
       "norm_label": "generateid()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L31"
+      "source_location": "L38"
+    },
+    {
+      "id": "src_routes_checkout_getsession",
+      "label": "getSession()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "getsession()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L307"
     },
     {
       "id": "src_routes_checkout_now",
@@ -157,7 +217,19 @@
       "file_type": "code",
       "norm_label": "now()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L35"
+      "source_location": "L42"
+    },
+    {
+      "id": "src_routes_checkout_resolvelineitems",
+      "label": "resolveLineItems()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "resolvelineitems()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L54"
     },
     {
       "id": "src_routes_checkout_sessiontoresponse",
@@ -169,7 +241,19 @@
       "file_type": "code",
       "norm_label": "sessiontoresponse()",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L114"
+      "source_location": "L121"
+    },
+    {
+      "id": "src_routes_checkout_updatesession",
+      "label": "updateSession()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 2,
+      "community_name": "checkout.js",
+      "file_type": "code",
+      "norm_label": "updatesession()",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L240"
     },
     {
       "id": "tests_server_test_signbody",
@@ -244,23 +328,11 @@
       "source_location": "L22"
     },
     {
-      "id": "src_routes_checkout_resolvelineitems",
-      "label": "resolveLineItems()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "mockProductFeed.js",
-      "file_type": "code",
-      "norm_label": "resolvelineitems()",
-      "source_file": "src/routes/checkout.js",
-      "source_location": "L47"
-    },
-    {
       "id": "docs_api_mapping_cheat_sheet",
       "label": "API_MAPPING_CHEAT_SHEET.md",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "page",
       "norm_label": "api_mapping_cheat_sheet.md",
@@ -272,7 +344,7 @@
       "label": "1. ACP-5 Endpoint Mapping to Razorpay",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "1. acp-5 endpoint mapping to razorpay",
@@ -284,7 +356,7 @@
       "label": "2. AP2-3 Mandate Authorization Chain",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "2. ap2-3 mandate authorization chain",
@@ -296,7 +368,7 @@
       "label": "3. Webhook Handling Taxonomy",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "3. webhook handling taxonomy",
@@ -308,7 +380,7 @@
       "label": "4. Cryptographic Validation Requirements",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "4. cryptographic validation requirements",
@@ -320,7 +392,7 @@
       "label": "API Mapping & Cheat Sheet",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "api mapping & cheat sheet",
@@ -328,122 +400,134 @@
       "source_location": "L1"
     },
     {
-      "id": "docs_architecture",
-      "label": "ARCHITECTURE.md",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "page",
-      "norm_label": "architecture.md",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L1"
-    },
-    {
-      "id": "docs_architecture_1_component_diagram",
-      "label": "1. Component diagram",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "1. component diagram",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L12"
-    },
-    {
-      "id": "docs_architecture_3_1_authentication_every_agent_merchant_request",
-      "label": "3.1 Authentication (every agent \u2192 merchant request)",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3.1 authentication (every agent \u2192 merchant request)",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L268"
-    },
-    {
-      "id": "docs_architecture_3_2_discovery_catalog",
-      "label": "3.2 Discovery & catalog",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3.2 discovery & catalog",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L277"
-    },
-    {
-      "id": "docs_architecture_3_3_checkout_session_lifecycle_the_5_acp_endpoints",
-      "label": "3.3 Checkout session lifecycle \u2014 the 5 ACP endpoints",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3.3 checkout session lifecycle \u2014 the 5 acp endpoints",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L284"
-    },
-    {
-      "id": "docs_architecture_3_4_webhooks_razorpay_merchant",
-      "label": "3.4 Webhooks (Razorpay \u2192 merchant)",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3.4 webhooks (razorpay \u2192 merchant)",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L342"
-    },
-    {
-      "id": "docs_architecture_3_5_mcp_tool_surface_what_the_buyer_agent_actually_calls",
-      "label": "3.5 MCP tool surface (what the buyer agent actually calls)",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3.5 mcp tool surface (what the buyer agent actually calls)",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L347"
-    },
-    {
-      "id": "docs_architecture_3_api_contracts_merchant_server_buyer_agent",
-      "label": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "3. api contracts (merchant server \u21c4 buyer agent)",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L266"
-    },
-    {
-      "id": "docs_architecture_architecture_agent_commerce_layer_for_razorpay",
-      "label": "Architecture \u2014 Agent Commerce Layer for Razorpay",
-      "_origin": "ast",
-      "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "architecture \u2014 agent commerce layer for razorpay",
-      "source_file": "docs/ARCHITECTURE.md",
-      "source_location": "L1"
-    },
-    {
       "id": "docs_decisions",
       "label": "DECISIONS.md",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "page",
       "norm_label": "decisions.md",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L1"
+    },
+    {
+      "id": "docs_decisions_adr_001_merchant_server_and_buyer_agent_are_two_independent_services_joined_by_mcp",
+      "label": "ADR-001 \u2014 Merchant server and buyer agent are two independent services, joined by MCP",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-001 \u2014 merchant server and buyer agent are two independent services, joined by mcp",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L7"
+    },
+    {
+      "id": "docs_decisions_adr_002_the_ap2_three_mandate_chain_is_the_authorization_backbone_each_party_signs_its_own_link",
+      "label": "ADR-002 \u2014 The AP2 three-mandate chain is the authorization backbone; each party signs its own link",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-002 \u2014 the ap2 three-mandate chain is the authorization backbone; each party signs its own link",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L15"
+    },
+    {
+      "id": "docs_decisions_adr_003_razorpay_orders_is_the_money_primitive_payment_links_is_the_human_in_the_loop_rail",
+      "label": "ADR-003 \u2014 Razorpay Orders is the money primitive; Payment Links is the human-in-the-loop rail",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-003 \u2014 razorpay orders is the money primitive; payment links is the human-in-the-loop rail",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L23"
+    },
+    {
+      "id": "docs_decisions_adr_004_money_is_an_integer_in_minor_units_paise_never_a_float",
+      "label": "ADR-004 \u2014 Money is an integer in minor units (paise); never a float",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-004 \u2014 money is an integer in minor units (paise); never a float",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L31"
+    },
+    {
+      "id": "docs_decisions_adr_005_the_audit_trail_is_a_hash_chained_append_only_log",
+      "label": "ADR-005 \u2014 The audit trail is a hash-chained append-only log",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-005 \u2014 the audit trail is a hash-chained append-only log",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L39"
+    },
+    {
+      "id": "docs_decisions_adr_006_guardrails_are_pure_server_side_functions_enforced_at_every_mandate_boundary_defense_in_depth",
+      "label": "ADR-006 \u2014 Guardrails are pure, server-side functions enforced at every mandate boundary (defense in depth)",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-006 \u2014 guardrails are pure, server-side functions enforced at every mandate boundary (defense in depth)",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L47"
+    },
+    {
+      "id": "docs_decisions_adr_007_idempotency_on_every_state_mutating_call_async_state_only_from_verified_webhooks",
+      "label": "ADR-007 \u2014 Idempotency on every state-mutating call; async state only from verified webhooks",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-007 \u2014 idempotency on every state-mutating call; async state only from verified webhooks",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L55"
+    },
+    {
+      "id": "docs_decisions_adr_008_agent_identity_via_attestation_header_bound_to_a_webauthn_principal",
+      "label": "ADR-008 \u2014 Agent identity via attestation header bound to a WebAuthn principal",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-008 \u2014 agent identity via attestation header bound to a webauthn principal",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L63"
+    },
+    {
+      "id": "docs_decisions_adr_009_the_checkout_state_machine_is_the_acp_5_stage_lifecycle_advanced_only_by_legal_transitions",
+      "label": "ADR-009 \u2014 The checkout state machine is the ACP 5-stage lifecycle, advanced only by legal transitions",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "adr-009 \u2014 the checkout state machine is the acp 5-stage lifecycle, advanced only by legal transitions",
+      "source_file": "docs/DECISIONS.md",
+      "source_location": "L71"
+    },
+    {
+      "id": "docs_decisions_architecture_decision_records",
+      "label": "Architecture Decision Records",
+      "_origin": "ast",
+      "community": 0,
+      "community_name": "Architecture Decision Records",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "architecture decision records",
       "source_file": "docs/DECISIONS.md",
       "source_location": "L1"
     },
@@ -452,7 +536,7 @@
       "label": "README.md",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "page",
       "norm_label": "readme.md",
@@ -464,7 +548,7 @@
       "label": "Agent Commerce Layer for Razorpay",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "agent commerce layer for razorpay",
@@ -476,7 +560,7 @@
       "label": "Development Setup",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "development setup",
@@ -488,7 +572,7 @@
       "label": "Documentation",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "documentation",
@@ -500,7 +584,7 @@
       "label": "Key Technologies",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "key technologies",
@@ -512,7 +596,7 @@
       "label": "Overview",
       "_origin": "ast",
       "community": 0,
-      "community_name": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "community_name": "Architecture Decision Records",
       "file_type": "document",
       "node_kind": "heading",
       "norm_label": "overview",
@@ -524,7 +608,7 @@
       "label": "index.js",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "index.js",
       "source_file": "src/config/index.js",
@@ -535,7 +619,7 @@
       "label": "config",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "config",
       "source_file": "src/config/index.js",
@@ -546,18 +630,51 @@
       "label": "dotenv",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "dotenv",
       "source_file": "src/config/index.js",
       "source_location": "L9"
     },
     {
+      "id": "src_lib_razorpayclient",
+      "label": "razorpayClient.js",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "code",
+      "norm_label": "razorpayclient.js",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_lib_razorpayclient_config",
+      "label": "config",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "code",
+      "norm_label": "config",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L15"
+    },
+    {
+      "id": "src_lib_razorpayclient_razorpay",
+      "label": "Razorpay",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "code",
+      "norm_label": "razorpay",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L14"
+    },
+    {
       "id": "src_routes_orders",
       "label": "orders.js",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "orders.js",
       "source_file": "src/routes/orders.js",
@@ -568,7 +685,7 @@
       "label": "config",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "config",
       "source_file": "src/routes/orders.js",
@@ -579,7 +696,7 @@
       "label": "express",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "express",
       "source_file": "src/routes/orders.js",
@@ -590,7 +707,7 @@
       "label": "razorpayClient",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "razorpayclient",
       "source_file": "src/routes/orders.js",
@@ -601,7 +718,7 @@
       "label": "router",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "code",
       "norm_label": "router",
       "source_file": "src/routes/orders.js",
@@ -612,7 +729,7 @@
       "label": "ADR-0003",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "concept",
       "norm_label": "adr-0003",
       "source_file": "src/config/index.js",
@@ -623,18 +740,51 @@
       "label": "ADR-0004",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "concept",
       "norm_label": "adr-0004",
       "source_file": "src/config/index.js",
       "source_location": "L6"
     },
     {
+      "id": "src_lib_razorpayclient_js_docref_adr_0003",
+      "label": "ADR-0003",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "concept",
+      "norm_label": "adr-0003",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L90"
+    },
+    {
+      "id": "src_lib_razorpayclient_js_docref_adr_0004",
+      "label": "ADR-0004",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "concept",
+      "norm_label": "adr-0004",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L66"
+    },
+    {
+      "id": "src_lib_razorpayclient_js_docref_adr_0007",
+      "label": "ADR-0007",
+      "_origin": "ast",
+      "community": 1,
+      "community_name": "razorpayClient.js",
+      "file_type": "concept",
+      "norm_label": "adr-0007",
+      "source_file": "src/lib/razorpayClient.js",
+      "source_location": "L11"
+    },
+    {
       "id": "src_routes_orders_js_docref_adr_0003",
       "label": "ADR-0003",
       "_origin": "ast",
       "community": 1,
-      "community_name": "orders.js",
+      "community_name": "razorpayClient.js",
       "file_type": "concept",
       "norm_label": "adr-0003",
       "source_file": "src/routes/orders.js",
@@ -707,192 +857,6 @@
       "source_location": "L1"
     },
     {
-      "id": "src_lib_razorpayclient",
-      "label": "razorpayClient.js",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "code",
-      "norm_label": "razorpayclient.js",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L1"
-    },
-    {
-      "id": "src_lib_razorpayclient_config",
-      "label": "config",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "code",
-      "norm_label": "config",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L15"
-    },
-    {
-      "id": "src_lib_razorpayclient_razorpay",
-      "label": "Razorpay",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "code",
-      "norm_label": "razorpay",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L14"
-    },
-    {
-      "id": "src_lib_razorpayclient_js_docref_adr_0003",
-      "label": "ADR-0003",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "concept",
-      "norm_label": "adr-0003",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L90"
-    },
-    {
-      "id": "src_lib_razorpayclient_js_docref_adr_0004",
-      "label": "ADR-0004",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "concept",
-      "norm_label": "adr-0004",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L66"
-    },
-    {
-      "id": "src_lib_razorpayclient_js_docref_adr_0007",
-      "label": "ADR-0007",
-      "_origin": "ast",
-      "community": 13,
-      "community_name": "razorpayClient.js",
-      "file_type": "concept",
-      "norm_label": "adr-0007",
-      "source_file": "src/lib/razorpayClient.js",
-      "source_location": "L11"
-    },
-    {
-      "id": "docs_decisions_adr_001_merchant_server_and_buyer_agent_are_two_independent_services_joined_by_mcp",
-      "label": "ADR-001 \u2014 Merchant server and buyer agent are two independent services, joined by MCP",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-001 \u2014 merchant server and buyer agent are two independent services, joined by mcp",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L7"
-    },
-    {
-      "id": "docs_decisions_adr_002_the_ap2_three_mandate_chain_is_the_authorization_backbone_each_party_signs_its_own_link",
-      "label": "ADR-002 \u2014 The AP2 three-mandate chain is the authorization backbone; each party signs its own link",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-002 \u2014 the ap2 three-mandate chain is the authorization backbone; each party signs its own link",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L15"
-    },
-    {
-      "id": "docs_decisions_adr_003_razorpay_orders_is_the_money_primitive_payment_links_is_the_human_in_the_loop_rail",
-      "label": "ADR-003 \u2014 Razorpay Orders is the money primitive; Payment Links is the human-in-the-loop rail",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-003 \u2014 razorpay orders is the money primitive; payment links is the human-in-the-loop rail",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L23"
-    },
-    {
-      "id": "docs_decisions_adr_004_money_is_an_integer_in_minor_units_paise_never_a_float",
-      "label": "ADR-004 \u2014 Money is an integer in minor units (paise); never a float",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-004 \u2014 money is an integer in minor units (paise); never a float",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L31"
-    },
-    {
-      "id": "docs_decisions_adr_005_the_audit_trail_is_a_hash_chained_append_only_log",
-      "label": "ADR-005 \u2014 The audit trail is a hash-chained append-only log",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-005 \u2014 the audit trail is a hash-chained append-only log",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L39"
-    },
-    {
-      "id": "docs_decisions_adr_006_guardrails_are_pure_server_side_functions_enforced_at_every_mandate_boundary_defense_in_depth",
-      "label": "ADR-006 \u2014 Guardrails are pure, server-side functions enforced at every mandate boundary (defense in depth)",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-006 \u2014 guardrails are pure, server-side functions enforced at every mandate boundary (defense in depth)",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L47"
-    },
-    {
-      "id": "docs_decisions_adr_007_idempotency_on_every_state_mutating_call_async_state_only_from_verified_webhooks",
-      "label": "ADR-007 \u2014 Idempotency on every state-mutating call; async state only from verified webhooks",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-007 \u2014 idempotency on every state-mutating call; async state only from verified webhooks",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L55"
-    },
-    {
-      "id": "docs_decisions_adr_008_agent_identity_via_attestation_header_bound_to_a_webauthn_principal",
-      "label": "ADR-008 \u2014 Agent identity via attestation header bound to a WebAuthn principal",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-008 \u2014 agent identity via attestation header bound to a webauthn principal",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L63"
-    },
-    {
-      "id": "docs_decisions_adr_009_the_checkout_state_machine_is_the_acp_5_stage_lifecycle_advanced_only_by_legal_transitions",
-      "label": "ADR-009 \u2014 The checkout state machine is the ACP 5-stage lifecycle, advanced only by legal transitions",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "adr-009 \u2014 the checkout state machine is the acp 5-stage lifecycle, advanced only by legal transitions",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L71"
-    },
-    {
-      "id": "docs_decisions_architecture_decision_records",
-      "label": "Architecture Decision Records",
-      "_origin": "ast",
-      "community": 14,
-      "community_name": "Architecture Decision Records",
-      "file_type": "document",
-      "node_kind": "heading",
-      "norm_label": "architecture decision records",
-      "source_file": "docs/DECISIONS.md",
-      "source_location": "L1"
-    },
-    {
       "id": "src_routes_checkout",
       "label": "checkout.js",
       "_origin": "ast",
@@ -912,7 +876,7 @@
       "file_type": "code",
       "norm_label": "crypto",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L20"
+      "source_location": "L27"
     },
     {
       "id": "src_routes_checkout_express",
@@ -923,7 +887,7 @@
       "file_type": "code",
       "norm_label": "express",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L21"
+      "source_location": "L28"
     },
     {
       "id": "src_routes_checkout_getmockproductfeed",
@@ -934,7 +898,7 @@
       "file_type": "code",
       "norm_label": "{ getmockproductfeed }",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L22"
+      "source_location": "L29"
     },
     {
       "id": "src_routes_checkout_router",
@@ -945,7 +909,7 @@
       "file_type": "code",
       "norm_label": "router",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L24"
+      "source_location": "L31"
     },
     {
       "id": "src_routes_checkout_sessions",
@@ -956,7 +920,7 @@
       "file_type": "code",
       "norm_label": "sessions",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L27"
+      "source_location": "L34"
     },
     {
       "id": "src_routes_checkout_js_docref_adr_0007",
@@ -967,7 +931,7 @@
       "file_type": "concept",
       "norm_label": "adr-0007",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L319"
+      "source_location": "L325"
     },
     {
       "id": "src_routes_products",
@@ -1100,6 +1064,17 @@
       "norm_label": "productsrouter",
       "source_file": "src/server.js",
       "source_location": "L21"
+    },
+    {
+      "id": "src_server_sessionaliasrouter",
+      "label": "sessionAliasRouter",
+      "_origin": "ast",
+      "community": 3,
+      "community_name": "server.js",
+      "file_type": "code",
+      "norm_label": "sessionaliasrouter",
+      "source_file": "src/server.js",
+      "source_location": "L66"
     },
     {
       "id": "src_server_webhookrouter",
@@ -1377,6 +1352,30 @@
       "source_location": "L18"
     },
     {
+      "id": "docs_architecture",
+      "label": "ARCHITECTURE.md",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "page",
+      "norm_label": "architecture.md",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L1"
+    },
+    {
+      "id": "docs_architecture_1_component_diagram",
+      "label": "1. Component diagram",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "1. component diagram",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L12"
+    },
+    {
       "id": "docs_architecture_2_1_mandate_envelope_shared_by_all_three_ap2_mandates",
       "label": "2.1 Mandate envelope (shared by all three AP2 mandates)",
       "_origin": "ast",
@@ -1459,6 +1458,90 @@
       "norm_label": "2. data models (exact json)",
       "source_file": "docs/ARCHITECTURE.md",
       "source_location": "L66"
+    },
+    {
+      "id": "docs_architecture_3_1_authentication_every_agent_merchant_request",
+      "label": "3.1 Authentication (every agent \u2192 merchant request)",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3.1 authentication (every agent \u2192 merchant request)",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L268"
+    },
+    {
+      "id": "docs_architecture_3_2_discovery_catalog",
+      "label": "3.2 Discovery & catalog",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3.2 discovery & catalog",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L277"
+    },
+    {
+      "id": "docs_architecture_3_3_checkout_session_lifecycle_the_5_acp_endpoints",
+      "label": "3.3 Checkout session lifecycle \u2014 the 5 ACP endpoints",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3.3 checkout session lifecycle \u2014 the 5 acp endpoints",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L284"
+    },
+    {
+      "id": "docs_architecture_3_4_webhooks_razorpay_merchant",
+      "label": "3.4 Webhooks (Razorpay \u2192 merchant)",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3.4 webhooks (razorpay \u2192 merchant)",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L342"
+    },
+    {
+      "id": "docs_architecture_3_5_mcp_tool_surface_what_the_buyer_agent_actually_calls",
+      "label": "3.5 MCP tool surface (what the buyer agent actually calls)",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3.5 mcp tool surface (what the buyer agent actually calls)",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L347"
+    },
+    {
+      "id": "docs_architecture_3_api_contracts_merchant_server_buyer_agent",
+      "label": "3. API contracts (merchant server \u21c4 buyer agent)",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "3. api contracts (merchant server \u21c4 buyer agent)",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L266"
+    },
+    {
+      "id": "docs_architecture_architecture_agent_commerce_layer_for_razorpay",
+      "label": "Architecture \u2014 Agent Commerce Layer for Razorpay",
+      "_origin": "ast",
+      "community": 5,
+      "community_name": "2. Data models (exact JSON)",
+      "file_type": "document",
+      "node_kind": "heading",
+      "norm_label": "architecture \u2014 agent commerce layer for razorpay",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": "L1"
     },
     {
       "id": "src_lib_verifyrazorpaysignature",
@@ -1593,7 +1676,18 @@
       "source_location": "L11"
     },
     {
-      "id": "src_routes_webhooks_rationale_100",
+      "id": "src_routes_webhooks_rationale_68",
+      "label": "TODO: Drive state machine CONFIRMED \u2192 PAID (Day 4+)",
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "webhooks.js",
+      "file_type": "rationale",
+      "norm_label": "todo: drive state machine confirmed \u2192 paid (day 4+)",
+      "source_file": "src/routes/webhooks.js",
+      "source_location": "L68"
+    },
+    {
+      "id": "src_routes_webhooks_rationale_75",
       "label": "TODO: Drive state machine \u2192 FAILED (Day 12)",
       "_origin": "ast",
       "community": 6,
@@ -1601,7 +1695,7 @@
       "file_type": "rationale",
       "norm_label": "todo: drive state machine \u2192 failed (day 12)",
       "source_file": "src/routes/webhooks.js",
-      "source_location": "L100"
+      "source_location": "L75"
     },
     {
       "id": "src_lib_mockproductfeed",
@@ -1634,7 +1728,7 @@
       "file_type": "code",
       "norm_label": "express",
       "source_file": "src/routes/feed.js",
-      "source_location": "L13"
+      "source_location": "L12"
     },
     {
       "id": "src_routes_feed_getmockproductfeed",
@@ -1645,7 +1739,7 @@
       "file_type": "code",
       "norm_label": "{ getmockproductfeed }",
       "source_file": "src/routes/feed.js",
-      "source_location": "L14"
+      "source_location": "L13"
     },
     {
       "id": "src_routes_feed_router",
@@ -1656,7 +1750,7 @@
       "file_type": "code",
       "norm_label": "router",
       "source_file": "src/routes/feed.js",
-      "source_location": "L16"
+      "source_location": "L15"
     },
     {
       "id": "tests_mockproductfeed_test",
@@ -1965,18 +2059,6 @@
     },
     {
       "source": "src_routes_checkout_buildstubmandate",
-      "target": "src_routes_checkout_generateid",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "src/routes/checkout.js",
-      "source_location": "L91",
-      "weight": 1.0
-    },
-    {
-      "source": "src_routes_checkout_buildstubmandate",
       "target": "src_routes_checkout_now",
       "relation": "calls",
       "_origin": "ast",
@@ -1984,7 +2066,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L98",
+      "source_location": "L105",
       "weight": 1.0
     },
     {
@@ -1996,7 +2078,163 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L99",
+      "source_location": "L106",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_buildstubmandate",
+      "target": "src_routes_checkout_generateid",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L98",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_cancelcheckout",
+      "target": "src_routes_checkout_errorresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L415",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_cancelcheckout",
+      "target": "src_routes_checkout_now",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L430",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_completecheckout",
+      "target": "src_routes_checkout_errorresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L340",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_completecheckout",
+      "target": "src_routes_checkout_generateid",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L364",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_completecheckout",
+      "target": "src_routes_checkout_now",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L366",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_createsession",
+      "target": "src_routes_checkout_errorresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L164",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_createsession",
+      "target": "src_routes_checkout_resolvelineitems",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L177",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_createsession",
+      "target": "src_routes_checkout_generateid",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L179",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_createsession",
+      "target": "src_routes_checkout_buildstubmandate",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L183",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_createsession",
+      "target": "src_routes_checkout_now",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L208",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_getsession",
+      "target": "src_routes_checkout_errorresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L311",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_getsession",
+      "target": "src_routes_checkout_sessiontoresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L315",
       "weight": 1.0
     },
     {
@@ -2008,7 +2246,55 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L48",
+      "source_location": "L55",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_updatesession",
+      "target": "src_routes_checkout_errorresponse",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L245",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_updatesession",
+      "target": "src_routes_checkout_resolvelineitems",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L262",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_updatesession",
+      "target": "src_routes_checkout_buildstubmandate",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L265",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_updatesession",
+      "target": "src_routes_checkout_now",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L281",
       "weight": 1.0
     },
     {
@@ -2020,7 +2306,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/checkout.test.js",
-      "source_location": "L57",
+      "source_location": "L51",
       "weight": 1.0
     },
     {
@@ -2032,7 +2318,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "tests/checkout.test.js",
-      "source_location": "L60",
+      "source_location": "L54",
       "weight": 1.0
     },
     {
@@ -2116,7 +2402,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L22",
+      "source_location": "L29",
       "weight": 1.0
     },
     {
@@ -2128,7 +2414,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/routes/feed.js",
-      "source_location": "L14",
+      "source_location": "L13",
       "weight": 1.0
     },
     {
@@ -2200,19 +2486,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/routes/checkout.js",
-      "source_location": "L22",
-      "weight": 1.0
-    },
-    {
-      "source": "src_routes_checkout",
-      "target": "src_lib_razorpayclient",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "src/routes/checkout.js",
-      "source_location": "L356",
+      "source_location": "L29",
       "weight": 1.0
     },
     {
@@ -2224,7 +2498,7 @@
       "confidence_score": 1.0,
       "context": "import",
       "source_file": "src/routes/feed.js",
-      "source_location": "L14",
+      "source_location": "L13",
       "weight": 1.0
     },
     {
@@ -2261,18 +2535,6 @@
       "context": "import",
       "source_file": "src/routes/webhooks.js",
       "source_location": "L15",
-      "weight": 1.0
-    },
-    {
-      "source": "src_routes_webhooks",
-      "target": "src_routes_checkout",
-      "relation": "imports_from",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "import",
-      "source_file": "src/routes/webhooks.js",
-      "source_location": "L65",
       "weight": 1.0
     },
     {
@@ -2470,7 +2732,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L319",
+      "source_location": "L325",
       "weight": 1.0
     },
     {
@@ -3273,7 +3535,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L114",
+      "source_location": "L121",
       "weight": 1.0
     },
     {
@@ -3284,7 +3546,29 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L140",
+      "source_location": "L147",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_createsession",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L158",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_updatesession",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L240",
       "weight": 1.0
     },
     {
@@ -3295,7 +3579,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L20",
+      "source_location": "L27",
       "weight": 1.0
     },
     {
@@ -3306,7 +3590,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L21",
+      "source_location": "L28",
       "weight": 1.0
     },
     {
@@ -3317,7 +3601,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L22",
+      "source_location": "L29",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_getsession",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L307",
       "weight": 1.0
     },
     {
@@ -3328,7 +3623,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L24",
+      "source_location": "L31",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_completecheckout",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L324",
       "weight": 1.0
     },
     {
@@ -3339,7 +3645,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L27",
+      "source_location": "L34",
       "weight": 1.0
     },
     {
@@ -3350,7 +3656,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L31",
+      "source_location": "L38",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_cancelcheckout",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L411",
       "weight": 1.0
     },
     {
@@ -3361,7 +3678,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L35",
+      "source_location": "L42",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout",
+      "target": "src_routes_checkout_attachsessionroutes",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L449",
       "weight": 1.0
     },
     {
@@ -3372,7 +3700,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L39",
+      "source_location": "L46",
       "weight": 1.0
     },
     {
@@ -3383,7 +3711,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L47",
+      "source_location": "L54",
       "weight": 1.0
     },
     {
@@ -3394,7 +3722,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/checkout.js",
-      "source_location": "L89",
+      "source_location": "L96",
       "weight": 1.0
     },
     {
@@ -3405,7 +3733,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/feed.js",
-      "source_location": "L13",
+      "source_location": "L12",
       "weight": 1.0
     },
     {
@@ -3416,7 +3744,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/feed.js",
-      "source_location": "L14",
+      "source_location": "L13",
       "weight": 1.0
     },
     {
@@ -3427,7 +3755,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/feed.js",
-      "source_location": "L16",
+      "source_location": "L15",
       "weight": 1.0
     },
     {
@@ -3640,6 +3968,17 @@
       "weight": 1.0
     },
     {
+      "source": "src_server",
+      "target": "src_server_sessionaliasrouter",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/server.js",
+      "source_location": "L66",
+      "weight": 1.0
+    },
+    {
       "source": "tests_checkout_test",
       "target": "tests_checkout_test_stubintentmandate",
       "relation": "contains",
@@ -3647,7 +3986,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/checkout.test.js",
-      "source_location": "L20",
+      "source_location": "L14",
       "weight": 1.0
     },
     {
@@ -3669,7 +4008,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/checkout.test.js",
-      "source_location": "L38",
+      "source_location": "L32",
       "weight": 1.0
     },
     {
@@ -3702,7 +4041,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "tests/checkout.test.js",
-      "source_location": "L56",
+      "source_location": "L50",
       "weight": 1.0
     },
     {
@@ -3805,14 +4144,25 @@
       "weight": 1.0
     },
     {
-      "source": "src_routes_webhooks_rationale_100",
+      "source": "src_routes_webhooks_rationale_68",
       "target": "src_routes_webhooks",
       "relation": "rationale_for",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/routes/webhooks.js",
-      "source_location": "L100",
+      "source_location": "L68",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_webhooks_rationale_75",
+      "target": "src_routes_webhooks",
+      "relation": "rationale_for",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/routes/webhooks.js",
+      "source_location": "L75",
       "weight": 1.0
     },
     {
@@ -3846,6 +4196,66 @@
       "confidence_score": 1.0,
       "source_file": "README.md",
       "source_location": "L9",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_attachsessionroutes",
+      "target": "src_routes_checkout_createsession",
+      "relation": "indirect_call",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "argument",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L452",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_attachsessionroutes",
+      "target": "src_routes_checkout_updatesession",
+      "relation": "indirect_call",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "argument",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L453",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_attachsessionroutes",
+      "target": "src_routes_checkout_getsession",
+      "relation": "indirect_call",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "argument",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L454",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_attachsessionroutes",
+      "target": "src_routes_checkout_completecheckout",
+      "relation": "indirect_call",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "argument",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L455",
+      "weight": 1.0
+    },
+    {
+      "source": "src_routes_checkout_attachsessionroutes",
+      "target": "src_routes_checkout_cancelcheckout",
+      "relation": "indirect_call",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "context": "argument",
+      "source_file": "src/routes/checkout.js",
+      "source_location": "L456",
       "weight": 1.0
     },
     {
@@ -3946,5 +4356,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "fbcddafdff735038328efd58e88da143eb8dea8e"
+  "built_at_commit": "5f230ca974f8ab02bb568583f3954c3fb404af3f"
 }

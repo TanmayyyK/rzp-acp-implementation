@@ -1,6 +1,6 @@
 {
-  "0": "3. API contracts (merchant server ⇄ buyer agent)",
-  "1": "orders.js",
+  "0": "Architecture Decision Records",
+  "1": "razorpayClient.js",
   "2": "checkout.js",
   "3": "server.js",
   "4": "package.json",
@@ -11,7 +11,5 @@
   "9": "devDependencies",
   "10": "checkout.test.js",
   "11": "eslint.config.js",
-  "12": "jest.config.js",
-  "13": "razorpayClient.js",
-  "14": "Architecture Decision Records"
+  "12": "jest.config.js"
 }
