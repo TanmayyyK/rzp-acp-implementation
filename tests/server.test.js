@@ -156,12 +156,13 @@ describe('Checkout session lifecycle', () => {
     expect(res.body.error.code).toBe('IDEMPOTENCY_KEY_MISSING');
   });
 
-  test('POST /complete with idempotency-key → 501 (not yet implemented)', async () => {
+  test('POST /complete with idempotency-key but fake session → 404', async () => {
     const res = await request(app)
       .post('/api/v1/checkout/sessions/fake_id/complete')
       .set('Idempotency-Key', 'idem_test_001')
       .send({});
-    expect(res.statusCode).toBe(501);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 });
 

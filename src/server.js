@@ -19,6 +19,7 @@ const webhookRouter = require('./routes/webhooks');
 const ordersRouter = require('./routes/orders');
 const checkoutRouter = require('./routes/checkout');
 const productsRouter = require('./routes/products');
+const feedRouter = require('./routes/feed');
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use(express.json());
 // 4. Application routes
 // ==========================================
 app.use('/api/v1/products', productsRouter);
+app.use('/api/v1/feed', feedRouter);
 app.use('/api/v1/orders', ordersRouter);
 app.use('/api/v1/checkout', checkoutRouter);
 

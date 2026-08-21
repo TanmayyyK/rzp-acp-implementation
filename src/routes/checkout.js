@@ -1,51 +1,322 @@
 'use strict';
 
 /**
- * Checkout session placeholder routes (ACP 5-stage lifecycle).
- * Full implementation arrives on Day 3–4; this wires the route
- * shapes and validates the idempotency-key requirement now.
+ * Checkout session routes — ACP 5-stage lifecycle.
+ *
+ * Endpoints:
+ *   POST   /api/v1/checkout/sessions                   — create session
+ *   PATCH  /api/v1/checkout/sessions/:id                — update session
+ *   GET    /api/v1/checkout/sessions/:id                — get session state
+ *   POST   /api/v1/checkout/sessions/:id/complete       — complete checkout
+ *   POST   /api/v1/checkout/sessions/:id/cancel         — cancel checkout
+ *
+ * All response shapes conform to docs/ACP_ENDPOINT_SCHEMAS.md.
+ *
+ * State is held in an in-memory Map for now (swapped for a DB on Day 5+).
+ * The /complete endpoint does NOT call Razorpay today — it validates the
+ * schema, records the mandate, and returns a simulated success response.
  */
 
+const crypto = require('crypto');
 const express = require('express');
+const { getMockProductFeed } = require('../lib/mockProductFeed');
+
 const router = express.Router();
 
-// POST /api/v1/checkout/sessions — create session (ACP stage 1)
+// ─── In-memory session store ────────────────────────────────────────────
+const sessions = new Map();
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+function generateId(prefix) {
+  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function expiresIn(minutes) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+/**
+ * Resolve requested line items against the product feed.
+ * Returns { items, total } or throws with a descriptive error.
+ */
+function resolveLineItems(requestedItems) {
+  const feed = getMockProductFeed();
+  const resolved = [];
+  let total = 0;
+
+  for (const item of requestedItems) {
+    if (!item.sku && !item.id) {
+      throw { code: 'INVALID_LINE_ITEM', message: 'Each item must have a sku or id' };
+    }
+
+    const product = feed.find(
+      (p) => p.id === (item.id || item.sku) || p.id === item.sku
+    );
+
+    if (!product) {
+      throw { code: 'PRODUCT_NOT_FOUND', message: `Product not found: ${item.sku || item.id}` };
+    }
+
+    if (!product.availability) {
+      throw { code: 'PRODUCT_UNAVAILABLE', message: `Product out of stock: ${product.id}` };
+    }
+
+    const qty = item.quantity || 1;
+    const lineTotal = product.price * qty;
+    total += lineTotal;
+
+    resolved.push({
+      sku: product.id,
+      title: product.title,
+      category: 'electronics',
+      quantity: qty,
+      unit_price: product.price,
+    });
+  }
+
+  return { items: resolved, total };
+}
+
+/**
+ * Build a stub SignedMandate envelope.
+ * In production this would be cryptographically signed with EdDSA.
+ */
+function buildStubMandate({ type, sessionId, prevMandateId, claims }) {
+  return {
+    mandate_id: generateId('mnd'),
+    type,
+    spec: 'ACP-2.0',
+    prev_mandate_id: prevMandateId || null,
+    session_id: sessionId,
+    issuer: 'merchant:agentic-commerce-node',
+    subject: 'buyer-agent',
+    issued_at: now(),
+    expires_at: expiresIn(30),
+    nonce: crypto.randomBytes(16).toString('hex'),
+    claims: claims || {},
+    proof: {
+      type: 'Ed25519Signature2020',
+      alg: 'EdDSA',
+      verification_method: 'did:key:merchant#key-1',
+      jws: 'stub_signature_' + crypto.randomBytes(32).toString('base64url'),
+    },
+  };
+}
+
+/**
+ * Serialize a session to the GetSessionStateResponse shape.
+ */
+function sessionToResponse(session) {
+  return {
+    order_id: session.orderId,
+    session_id: session.sessionId,
+    state: session.state,
+    amount: session.amount,
+    currency: session.currency,
+    line_items: session.lineItems,
+    mandate_chain: {
+      intent_mandate_id: session.intentMandateId,
+      cart_mandate_id: session.cartMandateId,
+      payment_mandate_id: session.paymentMandateId,
+    },
+    razorpay: {
+      order_id: session.razorpayOrderId,
+      payment_id: session.razorpayPaymentId,
+      payment_link_id: session.razorpayPaymentLinkId,
+    },
+    created_at: session.createdAt,
+    updated_at: session.updatedAt,
+    failure: session.failure,
+  };
+}
+
+// ─── Error helper ───────────────────────────────────────────────────────
+
+function errorResponse(res, status, code, message, retriable = false, sessionId) {
+  const body = { error: { code, message, retriable } };
+  if (sessionId) body.error.session_id = sessionId;
+  return res.status(status).json(body);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 1. CREATE CHECKOUT SESSION
+//    POST /api/v1/checkout/sessions
+// ═══════════════════════════════════════════════════════════════════════
+
 router.post('/sessions', (req, res) => {
-  res.status(501).json({
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Checkout session creation — arriving Day 3',
-      retriable: false,
-    },
-  });
+  try {
+    const { intent_mandate, requested_items } = req.body;
+
+    // --- Validate intent mandate ---
+    if (!intent_mandate || typeof intent_mandate !== 'object') {
+      return errorResponse(res, 400, 'MANDATE_MISSING', 'intent_mandate is required');
+    }
+    if (intent_mandate.type && intent_mandate.type !== 'IntentMandate') {
+      return errorResponse(res, 400, 'MANDATE_TYPE_MISMATCH',
+        `Expected IntentMandate, got ${intent_mandate.type}`);
+    }
+
+    // --- Validate requested items ---
+    if (!Array.isArray(requested_items) || requested_items.length === 0) {
+      return errorResponse(res, 400, 'INVALID_ITEMS', 'requested_items must be a non-empty array');
+    }
+
+    // --- Resolve items against feed ---
+    const { items, total } = resolveLineItems(requested_items);
+
+    const sessionId = generateId('acp_sess');
+    const orderId = generateId('ord');
+
+    // Build the CartMandate
+    const cartMandate = buildStubMandate({
+      type: 'CartMandate',
+      sessionId,
+      prevMandateId: intent_mandate.mandate_id || null,
+      claims: {
+        amount: total,
+        currency: 'INR',
+        line_items: items,
+      },
+    });
+
+    // Store session
+    const session = {
+      sessionId,
+      orderId,
+      state: 'CREATED',
+      amount: total,
+      currency: 'INR',
+      lineItems: items,
+      intentMandateId: intent_mandate.mandate_id || null,
+      cartMandateId: cartMandate.mandate_id,
+      paymentMandateId: null,
+      razorpayOrderId: null,
+      razorpayPaymentId: null,
+      razorpayPaymentLinkId: null,
+      createdAt: now(),
+      updatedAt: now(),
+      failure: null,
+      _cartMandate: cartMandate,
+    };
+
+    sessions.set(sessionId, session);
+
+    console.log(`[Checkout] Session created: ${sessionId} (${items.length} items, ₹${total / 100})`);
+
+    return res.status(201).json({
+      session_id: sessionId,
+      state: 'CREATED',
+      cart_mandate: cartMandate,
+      amount_total: total,
+      currency: 'INR',
+      expires_at: cartMandate.expires_at,
+    });
+  } catch (err) {
+    if (err.code) {
+      return errorResponse(res, 400, err.code, err.message);
+    }
+    console.error('[Checkout] Create session error:', err);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to create checkout session');
+  }
 });
 
-// PATCH /api/v1/checkout/sessions/:id — update session (ACP stage 2)
+// ═══════════════════════════════════════════════════════════════════════
+// 2. UPDATE CHECKOUT SESSION
+//    PATCH /api/v1/checkout/sessions/:id
+// ═══════════════════════════════════════════════════════════════════════
+
 router.patch('/sessions/:id', (req, res) => {
-  res.status(501).json({
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Checkout session update — arriving Day 3',
-      retriable: false,
-    },
-  });
+  try {
+    const session = sessions.get(req.params.id);
+
+    if (!session) {
+      return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+        `No session with id ${req.params.id}`, false, req.params.id);
+    }
+
+    if (session.state !== 'CREATED') {
+      return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+        `Cannot update session in state ${session.state}`, false, session.sessionId);
+    }
+
+    const { requested_items } = req.body;
+
+    if (!Array.isArray(requested_items) || requested_items.length === 0) {
+      return errorResponse(res, 400, 'INVALID_ITEMS',
+        'requested_items must be a non-empty array', false, session.sessionId);
+    }
+
+    // Resolve new items
+    const { items, total } = resolveLineItems(requested_items);
+
+    // Re-issue CartMandate with new nonce
+    const cartMandate = buildStubMandate({
+      type: 'CartMandate',
+      sessionId: session.sessionId,
+      prevMandateId: session.cartMandateId,
+      claims: {
+        amount: total,
+        currency: 'INR',
+        line_items: items,
+      },
+    });
+
+    // Update session
+    session.lineItems = items;
+    session.amount = total;
+    session.cartMandateId = cartMandate.mandate_id;
+    session._cartMandate = cartMandate;
+    session.updatedAt = now();
+
+    console.log(`[Checkout] Session updated: ${session.sessionId} (₹${total / 100})`);
+
+    return res.json({
+      session_id: session.sessionId,
+      state: 'CREATED',
+      cart_mandate: cartMandate,
+      amount_total: total,
+      currency: 'INR',
+      expires_at: cartMandate.expires_at,
+    });
+  } catch (err) {
+    if (err.code) {
+      return errorResponse(res, 400, err.code, err.message);
+    }
+    console.error('[Checkout] Update session error:', err);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to update checkout session');
+  }
 });
 
-// GET /api/v1/checkout/sessions/:id — get session state (ACP stage 3)
+// ═══════════════════════════════════════════════════════════════════════
+// 3. GET SESSION STATE
+//    GET /api/v1/checkout/sessions/:id
+// ═══════════════════════════════════════════════════════════════════════
+
 router.get('/sessions/:id', (req, res) => {
-  res.status(501).json({
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Checkout session state — arriving Day 3',
-      retriable: false,
-    },
-  });
+  const session = sessions.get(req.params.id);
+
+  if (!session) {
+    return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+      `No session with id ${req.params.id}`, false, req.params.id);
+  }
+
+  return res.json(sessionToResponse(session));
 });
 
-// POST /api/v1/checkout/sessions/:id/complete — complete checkout (ACP stage 4)
-router.post('/sessions/:id/complete', (req, res) => {
-  const idempotencyKey = req.headers['idempotency-key'];
+// ═══════════════════════════════════════════════════════════════════════
+// 4. COMPLETE CHECKOUT
+//    POST /api/v1/checkout/sessions/:id/complete
+//    Requires: Idempotency-Key header
+// ═══════════════════════════════════════════════════════════════════════
 
+router.post('/sessions/:id/complete', (req, res) => {
+  // --- Idempotency-Key enforcement (ADR-007) ---
+  const idempotencyKey = req.headers['idempotency-key'];
   if (!idempotencyKey) {
     return res.status(400).json({
       error: {
@@ -56,24 +327,114 @@ router.post('/sessions/:id/complete', (req, res) => {
     });
   }
 
-  res.status(501).json({
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Checkout completion — arriving Day 4',
-      retriable: false,
+  const session = sessions.get(req.params.id);
+
+  if (!session) {
+    return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+      `No session with id ${req.params.id}`, false, req.params.id);
+  }
+
+  if (session.state !== 'CREATED') {
+    return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+      `Cannot complete session in state ${session.state}`, false, session.sessionId);
+  }
+
+  const { payment_mandate } = req.body;
+
+  if (!payment_mandate || typeof payment_mandate !== 'object') {
+    return errorResponse(res, 400, 'MANDATE_MISSING',
+      'payment_mandate is required', false, session.sessionId);
+  }
+  if (payment_mandate.type && payment_mandate.type !== 'PaymentMandate') {
+    return errorResponse(res, 400, 'MANDATE_TYPE_MISMATCH',
+      `Expected PaymentMandate, got ${payment_mandate.type}`, false, session.sessionId);
+  }
+
+  // --- Simulate auto-approval vs escalation ---
+  // Day 3: No real Razorpay call — simulate the response shape
+  const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
+
+  session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
+  session.state = 'CONFIRMED';
+  session.updatedAt = now();
+
+  // Simulate a Razorpay order id for schema correctness
+  const simulatedRzpOrderId = 'order_simulated_' + crypto.randomBytes(6).toString('hex');
+  session.razorpayOrderId = simulatedRzpOrderId;
+
+  if (session.amount <= autoApproveThreshold) {
+    // Auto-approved path
+    console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId}`);
+
+    return res.status(200).json({
+      session_id: session.sessionId,
+      state: 'CONFIRMED',
+      order: {
+        order_id: session.orderId,
+        razorpay_order_id: simulatedRzpOrderId,
+      },
+      payment_mandate_id: session.paymentMandateId,
+      next: 'await_webhook',
+    });
+  } else {
+    // Escalated path — human approval via payment link
+    const simulatedLinkId = 'plink_simulated_' + crypto.randomBytes(6).toString('hex');
+    session.razorpayPaymentLinkId = simulatedLinkId;
+
+    console.log(`[Checkout] Session completed (escalated): ${session.sessionId}`);
+
+    return res.status(202).json({
+      session_id: session.sessionId,
+      state: 'CONFIRMED',
+      approval: {
+        type: 'payment_link',
+        url: `https://rzp.io/i/${simulatedLinkId}`,
+        payment_link_id: simulatedLinkId,
+      },
+      next: 'await_human_then_webhook',
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// 5. CANCEL CHECKOUT
+//    POST /api/v1/checkout/sessions/:id/cancel
+// ═══════════════════════════════════════════════════════════════════════
+
+router.post('/sessions/:id/cancel', (req, res) => {
+  const session = sessions.get(req.params.id);
+
+  if (!session) {
+    return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+      `No session with id ${req.params.id}`, false, req.params.id);
+  }
+
+  if (session.state === 'CANCELLED') {
+    return errorResponse(res, 409, 'ALREADY_CANCELLED',
+      'Session is already cancelled', false, session.sessionId);
+  }
+
+  if (session.state === 'PAID' || session.state === 'COMPLETED') {
+    return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+      `Cannot cancel session in state ${session.state}`, false, session.sessionId);
+  }
+
+  session.state = 'CANCELLED';
+  session.updatedAt = now();
+
+  console.log(`[Checkout] Session cancelled: ${session.sessionId}`);
+
+  return res.json({
+    session_id: session.sessionId,
+    state: 'CANCELLED',
+    razorpay: {
+      order_id: session.razorpayOrderId,
+      status: session.razorpayOrderId ? 'cancelled' : 'not_created',
     },
   });
 });
 
-// POST /api/v1/checkout/sessions/:id/cancel — cancel session (ACP stage 5)
-router.post('/sessions/:id/cancel', (req, res) => {
-  res.status(501).json({
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Checkout cancellation — arriving Day 3',
-      retriable: false,
-    },
-  });
-});
+// Exported for testing — allows tests to inspect/clear sessions
+router._sessions = sessions;
 
 module.exports = router;
