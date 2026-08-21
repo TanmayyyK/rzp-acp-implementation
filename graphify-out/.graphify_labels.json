@@ -1,0 +1,15 @@
+{
+  "0": "Architecture Decision Records",
+  "1": "razorpayClient.js",
+  "2": "checkout.js",
+  "3": "server.js",
+  "4": "package.json",
+  "5": "2. Data models (exact JSON)",
+  "6": "webhooks.js",
+  "7": "mockProductFeed.js",
+  "8": "ACP Endpoint Schemas (Day 3)",
+  "9": "devDependencies",
+  "10": "checkout.test.js",
+  "11": "eslint.config.js",
+  "12": "jest.config.js"
+}

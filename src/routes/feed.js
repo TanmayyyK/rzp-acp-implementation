@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * Feed route — ACP product feed using the Sonnet-drafted mockProductFeed.
+ * Product feed route (ACP).
  *
- * GET /api/v1/feed  — returns the full ACP-shaped product feed
+ * GET /feed — returns the mock ACP product feed.
  *
- * This is the canonical machine-readable product catalog endpoint
- * for AI shopping agents, separate from the human-oriented /products route.
+ * Backed by the pure, immutable mockProductFeed module. This is the
+ * catalog the checkout session endpoints price against: a line item's
+ * `sku` matches a product `id` from this feed.
  */
 
 const express = require('express');
@@ -14,10 +15,9 @@ const { getMockProductFeed } = require('../lib/mockProductFeed');
 
 const router = express.Router();
 
-// GET /api/v1/feed
+// GET /feed
 router.get('/', (_req, res) => {
   const products = getMockProductFeed();
-
   res.json({
     version: '2.0',
     protocol: 'ACP',

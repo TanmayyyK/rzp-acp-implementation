@@ -34,6 +34,7 @@ app.get('/.well-known/acp.json', (_req, res) => {
     capabilities: ['search', 'recommend', 'compare', 'negotiate', 'transact'],
     endpoints: {
       products: '/api/v1/products',
+      feed: '/api/v1/feed',
       checkout_sessions: '/api/v1/checkout/sessions',
       webhooks: '/api/v1/webhooks/razorpay',
     },
@@ -58,8 +59,18 @@ app.use(express.json());
 // ==========================================
 app.use('/api/v1/products', productsRouter);
 app.use('/api/v1/feed', feedRouter);
+app.use('/feed', feedRouter);
 app.use('/api/v1/orders', ordersRouter);
 app.use('/api/v1/checkout', checkoutRouter);
+app.use('/session', (req, res, next) => {
+  if (req.url === '/' || req.url === '') {
+    req.url = '/sessions';
+  } else {
+    req.url = '/sessions' + req.url;
+  }
+  checkoutRouter(req, res, next);
+});
+
 
 // ==========================================
 // 5. Health check
@@ -78,8 +89,10 @@ if (require.main === module) {
     console.log(`🔍 ACP Discovery: http://localhost:${port}/.well-known/acp.json`);
     console.log(`🪝 Webhooks:      http://localhost:${port}/api/v1/webhooks/razorpay`);
     console.log(`📦 Products:      http://localhost:${port}/api/v1/products`);
+    console.log(`📋 Feed:          http://localhost:${port}/feed`);
     console.log(`💳 Orders:        http://localhost:${port}/api/v1/orders`);
     console.log(`🛒 Checkout:      http://localhost:${port}/api/v1/checkout/sessions`);
+    console.log(`🛒 Session alias: http://localhost:${port}/session`);
   });
 }
 

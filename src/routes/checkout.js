@@ -314,85 +314,100 @@ router.get('/sessions/:id', (req, res) => {
 //    Requires: Idempotency-Key header
 // ═══════════════════════════════════════════════════════════════════════
 
-router.post('/sessions/:id/complete', (req, res) => {
-  // --- Idempotency-Key enforcement (ADR-007) ---
-  const idempotencyKey = req.headers['idempotency-key'];
-  if (!idempotencyKey) {
-    return res.status(400).json({
-      error: {
-        code: 'IDEMPOTENCY_KEY_MISSING',
-        message: 'Idempotency-Key header is required on state-mutating checkout calls (ADR-007)',
-        retriable: false,
-      },
-    });
-  }
+router.post('/sessions/:id/complete', async (req, res) => {
+  try {
+    // --- Idempotency-Key enforcement (ADR-007) ---
+    const idempotencyKey = req.headers['idempotency-key'];
+    if (!idempotencyKey) {
+      return res.status(400).json({
+        error: {
+          code: 'IDEMPOTENCY_KEY_MISSING',
+          message: 'Idempotency-Key header is required on state-mutating checkout calls (ADR-007)',
+          retriable: false,
+        },
+      });
+    }
 
-  const session = sessions.get(req.params.id);
+    const session = sessions.get(req.params.id);
 
-  if (!session) {
-    return errorResponse(res, 404, 'SESSION_NOT_FOUND',
-      `No session with id ${req.params.id}`, false, req.params.id);
-  }
+    if (!session) {
+      return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+        `No session with id ${req.params.id}`, false, req.params.id);
+    }
 
-  if (session.state !== 'CREATED') {
-    return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
-      `Cannot complete session in state ${session.state}`, false, session.sessionId);
-  }
+    if (session.state !== 'CREATED') {
+      return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+        `Cannot complete session in state ${session.state}`, false, session.sessionId);
+    }
 
-  const { payment_mandate } = req.body;
+    const { payment_mandate } = req.body;
 
-  if (!payment_mandate || typeof payment_mandate !== 'object') {
-    return errorResponse(res, 400, 'MANDATE_MISSING',
-      'payment_mandate is required', false, session.sessionId);
-  }
-  if (payment_mandate.type && payment_mandate.type !== 'PaymentMandate') {
-    return errorResponse(res, 400, 'MANDATE_TYPE_MISMATCH',
-      `Expected PaymentMandate, got ${payment_mandate.type}`, false, session.sessionId);
-  }
+    if (!payment_mandate || typeof payment_mandate !== 'object') {
+      return errorResponse(res, 400, 'MANDATE_MISSING',
+        'payment_mandate is required', false, session.sessionId);
+    }
+    if (payment_mandate.type && payment_mandate.type !== 'PaymentMandate') {
+      return errorResponse(res, 400, 'MANDATE_TYPE_MISMATCH',
+        `Expected PaymentMandate, got ${payment_mandate.type}`, false, session.sessionId);
+    }
 
-  // --- Simulate auto-approval vs escalation ---
-  // Day 3: No real Razorpay call — simulate the response shape
-  const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
+    // --- Day 4: Call live Razorpay API ---
+    const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
+    const razorpayClient = require('../lib/razorpayClient');
 
-  session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
-  session.state = 'CONFIRMED';
-  session.updatedAt = now();
+    session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
+    session.state = 'CONFIRMED';
+    session.updatedAt = now();
 
-  // Simulate a Razorpay order id for schema correctness
-  const simulatedRzpOrderId = 'order_simulated_' + crypto.randomBytes(6).toString('hex');
-  session.razorpayOrderId = simulatedRzpOrderId;
+    if (session.amount <= autoApproveThreshold) {
+      // Auto-approved path: POST /v1/orders
+      const rzpOrder = await razorpayClient.createOrder({
+        amount: session.amount,
+        currency: session.currency,
+        receipt: session.orderId,
+        notes: { session_id: session.sessionId },
+      });
 
-  if (session.amount <= autoApproveThreshold) {
-    // Auto-approved path
-    console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId}`);
+      session.razorpayOrderId = rzpOrder.id;
+      console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId} -> ${rzpOrder.id}`);
 
-    return res.status(200).json({
-      session_id: session.sessionId,
-      state: 'CONFIRMED',
-      order: {
-        order_id: session.orderId,
-        razorpay_order_id: simulatedRzpOrderId,
-      },
-      payment_mandate_id: session.paymentMandateId,
-      next: 'await_webhook',
-    });
-  } else {
-    // Escalated path — human approval via payment link
-    const simulatedLinkId = 'plink_simulated_' + crypto.randomBytes(6).toString('hex');
-    session.razorpayPaymentLinkId = simulatedLinkId;
+      return res.status(200).json({
+        session_id: session.sessionId,
+        state: 'CONFIRMED',
+        order: {
+          order_id: session.orderId,
+          razorpay_order_id: rzpOrder.id,
+        },
+        payment_mandate_id: session.paymentMandateId,
+        next: 'await_webhook',
+      });
+    } else {
+      // Escalated path: POST /v1/payment_links
+      const plink = await razorpayClient.createPaymentLink({
+        amount: session.amount,
+        currency: session.currency,
+        description: `Order ${session.orderId}`,
+        receipt: session.orderId,
+        notes: { session_id: session.sessionId },
+      });
 
-    console.log(`[Checkout] Session completed (escalated): ${session.sessionId}`);
+      session.razorpayPaymentLinkId = plink.id;
+      console.log(`[Checkout] Session completed (escalated): ${session.sessionId} -> ${plink.id}`);
 
-    return res.status(202).json({
-      session_id: session.sessionId,
-      state: 'CONFIRMED',
-      approval: {
-        type: 'payment_link',
-        url: `https://rzp.io/i/${simulatedLinkId}`,
-        payment_link_id: simulatedLinkId,
-      },
-      next: 'await_human_then_webhook',
-    });
+      return res.status(202).json({
+        session_id: session.sessionId,
+        state: 'CONFIRMED',
+        approval: {
+          type: 'payment_link',
+          url: plink.short_url,
+          payment_link_id: plink.id,
+        },
+        next: 'await_human_then_webhook',
+      });
+    }
+  } catch (err) {
+    console.error('[Checkout] Complete session error:', err);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to complete checkout session');
   }
 });
 

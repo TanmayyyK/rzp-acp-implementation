@@ -1,0 +1,146 @@
+{
+  ".claude/settings.local.json": {
+    "mtime": 1787335049.6120667,
+    "seen": 1787343078.0251288,
+    "ast_hash": "012bf9901d2ebd6a34612f70654228b2",
+    "semantic_hash": ""
+  },
+  "eslint.config.js": {
+    "mtime": 1787342600.7969759,
+    "seen": 1787343078.025132,
+    "ast_hash": "1197cfbc7d99aba62e319cdf76ce03a0",
+    "semantic_hash": ""
+  },
+  "jest.config.js": {
+    "mtime": 1787339017.447576,
+    "seen": 1787343078.0251331,
+    "ast_hash": "bef0f24320775ea07948532bfb860b55",
+    "semantic_hash": ""
+  },
+  "package.json": {
+    "mtime": 1787340159.3895018,
+    "seen": 1787343078.025134,
+    "ast_hash": "9fd182e7bb16b5cd4656eb8d888be302",
+    "semantic_hash": ""
+  },
+  "src/config/index.js": {
+    "mtime": 1787339035.652322,
+    "seen": 1787343078.025134,
+    "ast_hash": "282baa39fdb8514709f60dd81bb8099b",
+    "semantic_hash": ""
+  },
+  "src/lib/mockProductFeed.js": {
+    "mtime": 1787343029.8896863,
+    "seen": 1787343078.025135,
+    "ast_hash": "9c506614af301565052fcda010797bb1",
+    "semantic_hash": ""
+  },
+  "src/lib/razorpayClient.js": {
+    "mtime": 1787340187.088712,
+    "seen": 1787343078.025135,
+    "ast_hash": "f1c9f493a01a9ee33276d1889e2cff3f",
+    "semantic_hash": ""
+  },
+  "src/lib/verifyRazorpaySignature.js": {
+    "mtime": 1787339017.4508653,
+    "seen": 1787343078.0251362,
+    "ast_hash": "c1ae84f05249ab96bd4c3c7835af662e",
+    "semantic_hash": ""
+  },
+  "src/routes/checkout.js": {
+    "mtime": 1787343006.9021761,
+    "seen": 1787343078.0251362,
+    "ast_hash": "277f03b4e7bd2bf95cf4321688068d53",
+    "semantic_hash": ""
+  },
+  "src/routes/feed.js": {
+    "mtime": 1787343021.6253808,
+    "seen": 1787343078.025137,
+    "ast_hash": "e901a6f6289afda55551d1b6ac7163fc",
+    "semantic_hash": ""
+  },
+  "src/routes/orders.js": {
+    "mtime": 1787340196.8613958,
+    "seen": 1787343078.025137,
+    "ast_hash": "e4d00fd8de57776577b2e44d564e36a2",
+    "semantic_hash": ""
+  },
+  "src/routes/products.js": {
+    "mtime": 1787339126.2234075,
+    "seen": 1787343078.025138,
+    "ast_hash": "7d0f4f5224eb6a56d92d2a1bef73ffda",
+    "semantic_hash": ""
+  },
+  "src/routes/webhooks.js": {
+    "mtime": 1787340201.1597779,
+    "seen": 1787343078.025138,
+    "ast_hash": "b5646bfa2799d7d5e245dcf094888a8b",
+    "semantic_hash": ""
+  },
+  "src/server.js": {
+    "mtime": 1787343003.7079854,
+    "seen": 1787343078.0251389,
+    "ast_hash": "dec7e46776f925318ace357abc1de638",
+    "semantic_hash": ""
+  },
+  "tests/checkout.test.js": {
+    "mtime": 1787343015.6213183,
+    "seen": 1787343078.0251389,
+    "ast_hash": "59d3a6c6dc3598769bd69e8db06f899a",
+    "semantic_hash": ""
+  },
+  "tests/mockProductFeed.test.js": {
+    "mtime": 1787343050.130079,
+    "seen": 1787343078.02514,
+    "ast_hash": "67d7c194d71b30c5c30fb2974159519b",
+    "semantic_hash": ""
+  },
+  "tests/server.test.js": {
+    "mtime": 1787343021.7969356,
+    "seen": 1787343078.02514,
+    "ast_hash": "cd3e3abc2f0faff67ad33f253cf77a18",
+    "semantic_hash": ""
+  },
+  "tests/verifyRazorpaySignature.test.js": {
+    "mtime": 1787339160.0168316,
+    "seen": 1787343078.025141,
+    "ast_hash": "d9769760e80af42be8c33a736be90e54",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1787339166.473623,
+    "seen": 1787343078.025141,
+    "ast_hash": "e8ea01460c8634f43f57495de105ec65",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1787336800.1835008,
+    "seen": 1787343078.025142,
+    "ast_hash": "863dfc4bb2f1a5cca8a13495982fe00e",
+    "semantic_hash": ""
+  },
+  "docs/ACP_ENDPOINT_SCHEMAS.md": {
+    "mtime": 1787341112.1442366,
+    "seen": 1787343078.025142,
+    "ast_hash": "0ed9c83f59f5c685c57245bd3429a9e2",
+    "semantic_hash": ""
+  },
+  "docs/API_MAPPING_CHEAT_SHEET.md": {
+    "mtime": 1787336811.296438,
+    "seen": 1787343078.0251431,
+    "ast_hash": "936866cadf53b2561363d81c2422cc71",
+    "semantic_hash": ""
+  },
+  "docs/ARCHITECTURE.md": {
+    "mtime": 1787335969.5446296,
+    "seen": 1787343078.0251431,
+    "ast_hash": "6ff3aedd48abee34af77259d06d66773",
+    "semantic_hash": ""
+  },
+  "docs/DECISIONS.md": {
+    "mtime": 1787335933.158651,
+    "seen": 1787343078.025144,
+    "ast_hash": "3b57d2cbffcf898c6b7cff1b285030f8",
+    "semantic_hash": ""
+  }
+}

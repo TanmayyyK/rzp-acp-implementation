@@ -27,6 +27,8 @@ describe('GET /.well-known/acp.json', () => {
     expect(res.body.checkout_lifecycle).toEqual([
       'CREATED', 'CONFIRMED', 'PAID', 'FULFILLING', 'COMPLETED',
     ]);
+    expect(res.body.endpoints.feed).toBe('/api/v1/feed');
+    expect(res.body.endpoints.checkout_sessions).toBe('/api/v1/checkout/sessions');
   });
 });
 

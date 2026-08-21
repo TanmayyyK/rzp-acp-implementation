@@ -62,14 +62,39 @@ router.post('/', (req, res) => {
     processedEventIds.add(event.id);
 
     // Dispatch by event type
+    const checkoutRouter = require('./checkout');
+    const sessionsMap = checkoutRouter._sessions;
+
     switch (event.event) {
-      case 'order.paid':
-        console.log(`[Webhook] Order paid: ${event.payload.order.entity.id}`);
-        // TODO: Drive state machine CONFIRMED → PAID (Day 4+)
+      case 'order.paid': {
+        const orderId = event.payload.order.entity.id;
+        console.log(`[Webhook] Order paid: ${orderId}`);
+        // Find session by Razorpay order ID
+        for (const [sessId, session] of sessionsMap.entries()) {
+          if (session.razorpayOrderId === orderId && session.state === 'CONFIRMED') {
+            session.state = 'PAID';
+            session.updatedAt = new Date().toISOString();
+            console.log(`[Webhook] Session ${sessId} transitioned CONFIRMED -> PAID`);
+            break;
+          }
+        }
         break;
-      case 'payment.captured':
-        console.log(`[Webhook] Payment captured: ${event.payload.payment.entity.id}`);
+      }
+      case 'payment.captured': {
+        const paymentId = event.payload.payment.entity.id;
+        const orderId = event.payload.payment.entity.order_id;
+        console.log(`[Webhook] Payment captured: ${paymentId}`);
+        for (const [sessId, session] of sessionsMap.entries()) {
+          if (session.razorpayOrderId === orderId && session.state === 'CONFIRMED') {
+            session.state = 'PAID';
+            session.razorpayPaymentId = paymentId;
+            session.updatedAt = new Date().toISOString();
+            console.log(`[Webhook] Session ${sessId} transitioned CONFIRMED -> PAID with payment ${paymentId}`);
+            break;
+          }
+        }
         break;
+      }
       case 'payment.failed':
         console.log(`[Webhook] Payment failed: ${event.payload.payment.entity.id}`);
         // TODO: Drive state machine → FAILED (Day 12)

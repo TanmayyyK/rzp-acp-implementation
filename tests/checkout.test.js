@@ -4,6 +4,12 @@ const request = require('supertest');
 const app = require('../src/server');
 const checkoutRouter = require('../src/routes/checkout');
 
+// Mock Razorpay client to avoid real API calls during tests
+jest.mock('../src/lib/razorpayClient', () => ({
+  createOrder: jest.fn(async (params) => ({ id: 'order_simulated_mock', ...params })),
+  createPaymentLink: jest.fn(async (params) => ({ id: 'plink_simulated_mock', short_url: 'https://rzp.io/i/plink_simulated_mock', ...params })),
+}));
+
 // Clear the in-memory session store between tests
 beforeEach(() => {
   checkoutRouter._sessions.clear();
@@ -60,6 +66,17 @@ async function createSession() {
 // ═══════════════════════════════════════════════════════════════════════
 // FEED ROUTE
 // ═══════════════════════════════════════════════════════════════════════
+
+describe('GET /feed', () => {
+  test('short alias and /api/v1/feed both return the ACP product feed', async () => {
+    const short = await request(app).get('/feed');
+    const namespaced = await request(app).get('/api/v1/feed');
+    expect(short.statusCode).toBe(200);
+    expect(namespaced.statusCode).toBe(200);
+    expect(short.body.protocol).toBe('ACP');
+    expect(short.body.products.length).toBe(namespaced.body.products.length);
+  });
+});
 
 describe('GET /api/v1/feed', () => {
   test('returns 200 with ACP product feed', async () => {
@@ -438,5 +455,59 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
       .send({ requested_items: [{ sku: 'prod_electronics_002', quantity: 1 }] });
     expect(res.statusCode).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATE_TRANSITION');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHORT ALIASES — /session
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('short /session aliases', () => {
+  test('POST /session creates a session with the schema shape', async () => {
+    const res = await request(app)
+      .post('/session')
+      .send({
+        intent_mandate: stubIntentMandate(),
+        requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }],
+      });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.session_id).toMatch(/^acp_sess_/);
+    expect(res.body.state).toBe('CREATED');
+    expect(res.body.cart_mandate.type).toBe('CartMandate');
+    expect(res.body.amount_total).toBe(179900);
+    expect(res.body.currency).toBe('INR');
+  });
+
+  test('GET /session/:id, PATCH, complete, and cancel share the in-memory store', async () => {
+    const created = await request(app)
+      .post('/session')
+      .send({
+        intent_mandate: stubIntentMandate(),
+        requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }],
+      });
+    const sessionId = created.body.session_id;
+
+    const patched = await request(app)
+      .patch(`/session/${sessionId}`)
+      .send({ requested_items: [{ sku: 'prod_electronics_002', quantity: 1 }] });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.body.amount_total).toBe(199900);
+
+    const got = await request(app).get(`/session/${sessionId}`);
+    expect(got.statusCode).toBe(200);
+    expect(got.body.amount).toBe(199900);
+    expect(got.body.mandate_chain.cart_mandate_id).toBe(patched.body.cart_mandate.mandate_id);
+
+    const completed = await request(app)
+      .post(`/session/${sessionId}/complete`)
+      .set('Idempotency-Key', 'idem_alias_001')
+      .send({ payment_mandate: stubPaymentMandate() });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.body.next).toBe('await_webhook');
+    expect(completed.body.order.razorpay_order_id).toMatch(/^order_simulated_/);
+
+    const cancelled = await request(app).post(`/session/${sessionId}/cancel`).send();
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.body.state).toBe('CANCELLED');
   });
 });
