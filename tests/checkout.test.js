@@ -357,6 +357,26 @@ describe('POST /api/v1/checkout/sessions/:id/complete', () => {
     expect(res.body.error.code).toBe('INVALID_STATE_TRANSITION');
   });
 
+  test('idempotent replay — same Idempotency-Key replays the original response, not a 409', async () => {
+    const created = await createSession();
+    const sessionId = created.body.session_id;
+
+    const first = await request(app)
+      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
+      .set('Idempotency-Key', 'idem_replay_001')
+      .send({ payment_mandate: stubPaymentMandate() });
+
+    // Same key, replayed as if the original 200 was lost in transit.
+    const retry = await request(app)
+      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
+      .set('Idempotency-Key', 'idem_replay_001')
+      .send({ payment_mandate: stubPaymentMandate() });
+
+    expect(first.statusCode).toBe(200);
+    expect(retry.statusCode).toBe(200); // must NOT 409 — this is the retry-safety guarantee
+    expect(retry.body).toEqual(first.body); // byte-for-byte replay of the original completion
+  });
+
   test('session state is CONFIRMED after complete', async () => {
     const created = await createSession();
     const sessionId = created.body.session_id;

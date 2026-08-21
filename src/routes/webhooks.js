@@ -67,31 +67,39 @@ router.post('/', (req, res) => {
 
     switch (event.event) {
       case 'order.paid': {
-        const orderId = event.payload.order.entity.id;
-        console.log(`[Webhook] Order paid: ${orderId}`);
-        // Find session by Razorpay order ID
-        for (const [sessId, session] of sessionsMap.entries()) {
-          if (session.razorpayOrderId === orderId && session.state === 'CONFIRMED') {
-            session.state = 'PAID';
-            session.updatedAt = new Date().toISOString();
-            console.log(`[Webhook] Session ${sessId} transitioned CONFIRMED -> PAID`);
-            break;
-          }
+        const orderEntity = event.payload.order.entity;
+        const sessionId = orderEntity.notes && orderEntity.notes.session_id;
+        console.log(`[Webhook] Order paid: ${orderEntity.id}`);
+        
+        const session = sessionId ? sessionsMap.get(sessionId) : null;
+        if (session && ['CREATED', 'PROCESSING', 'CONFIRMED'].includes(session.state)) {
+          session.state = 'PAID';
+          session.razorpayOrderId = orderEntity.id; // Catch up in case the webhook beat the POST /complete response
+          session.updatedAt = new Date().toISOString();
+          console.log(`[Webhook] Session ${sessionId} transitioned to PAID`);
+        } else if (!session) {
+          console.warn(`[Webhook] Session not found for order ${orderEntity.id}`);
         }
         break;
       }
       case 'payment.captured': {
-        const paymentId = event.payload.payment.entity.id;
-        const orderId = event.payload.payment.entity.order_id;
-        console.log(`[Webhook] Payment captured: ${paymentId}`);
-        for (const [sessId, session] of sessionsMap.entries()) {
-          if (session.razorpayOrderId === orderId && session.state === 'CONFIRMED') {
-            session.state = 'PAID';
-            session.razorpayPaymentId = paymentId;
-            session.updatedAt = new Date().toISOString();
-            console.log(`[Webhook] Session ${sessId} transitioned CONFIRMED -> PAID with payment ${paymentId}`);
-            break;
+        const paymentEntity = event.payload.payment.entity;
+        const sessionId = paymentEntity.notes && paymentEntity.notes.session_id;
+        console.log(`[Webhook] Payment captured: ${paymentEntity.id}`);
+        
+        const session = sessionId ? sessionsMap.get(sessionId) : null;
+        if (session && ['CREATED', 'PROCESSING', 'CONFIRMED'].includes(session.state)) {
+          session.state = 'PAID';
+          session.razorpayPaymentId = paymentEntity.id;
+          if (paymentEntity.order_id) {
+            session.razorpayOrderId = paymentEntity.order_id;
+          } else {
+            session.razorpayPaymentLinkId = paymentEntity.invoice_id; // Payment links use invoice_id internally
           }
+          session.updatedAt = new Date().toISOString();
+          console.log(`[Webhook] Session ${sessionId} transitioned to PAID with payment ${paymentEntity.id}`);
+        } else if (!session) {
+          console.warn(`[Webhook] Session not found for payment ${paymentEntity.id}`);
         }
         break;
       }

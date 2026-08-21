@@ -337,9 +337,24 @@ router.post('/sessions/:id/complete', async (req, res) => {
         `No session with id ${req.params.id}`, false, req.params.id);
     }
 
+    // --- Idempotent replay (ADR-007) ---
+    // A retry carrying the SAME Idempotency-Key replays the original
+    // completion response verbatim, instead of tripping the state guard
+    // below. This is what makes /complete retry-safe for an agent whose
+    // original 200/202 was lost in transit — without it, the second call
+    // would 409 and the agent would wrongly conclude checkout failed.
+    // A DIFFERENT key on an already-completed session still falls through
+    // to the state guard and correctly 409s.
+    const priorCompletion = session._completionByKey && session._completionByKey[idempotencyKey];
+    if (priorCompletion) {
+      return res.status(priorCompletion.statusCode).json(priorCompletion.body);
+    }
+
     if (session.state !== 'CREATED') {
-      return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
-        `Cannot complete session in state ${session.state}`, false, session.sessionId);
+      if (!(session.state === 'PROCESSING' && session._processingIdempotencyKey === idempotencyKey)) {
+        return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+          `Cannot complete session in state ${session.state}`, false, session.sessionId);
+      }
     }
 
     const { payment_mandate } = req.body;
@@ -357,8 +372,15 @@ router.post('/sessions/:id/complete', async (req, res) => {
     const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
     const razorpayClient = require('../lib/razorpayClient');
 
-    session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
-    session.updatedAt = now();
+    if (session.state !== 'PROCESSING') {
+      session.paymentMandateId = payment_mandate.mandate_id || generateId('mnd');
+      session.updatedAt = now();
+      
+      // Mark as PROCESSING synchronously to prevent concurrent requests with different idempotency keys
+      // from triggering a double-charge race condition.
+      session.state = 'PROCESSING';
+      session._processingIdempotencyKey = idempotencyKey;
+    }
 
     try {
       if (session.amount <= autoApproveThreshold) {
@@ -372,20 +394,25 @@ router.post('/sessions/:id/complete', async (req, res) => {
           })
         );
 
-        session.state = 'CONFIRMED';
+        // If webhook arrived during the await and marked it PAID, don't regress it to CONFIRMED
+        if (session.state !== 'PAID' && session.state !== 'CANCELLED') {
+          session.state = 'CONFIRMED';
+        }
         session.razorpayOrderId = rzpOrder.id;
         console.log(`[Checkout] Session completed (auto-approved): ${session.sessionId} -> ${rzpOrder.id}`);
 
-        return res.status(200).json({
+        const body = {
           session_id: session.sessionId,
-          state: 'CONFIRMED',
+          state: session.state, // Return actual state, could be PAID already
           order: {
             order_id: session.orderId,
             razorpay_order_id: rzpOrder.id,
           },
           payment_mandate_id: session.paymentMandateId,
-          next: 'await_webhook',
-        });
+          next: session.state === 'PAID' ? 'none' : 'await_webhook',
+        };
+        (session._completionByKey || (session._completionByKey = {}))[idempotencyKey] = { statusCode: 200, body };
+        return res.status(200).json(body);
       } else {
         // Escalated path: POST /v1/payment_links
         const plink = await rzpIdempotency.execute(idempotencyKey, () =>
@@ -398,20 +425,24 @@ router.post('/sessions/:id/complete', async (req, res) => {
           })
         );
 
-        session.state = 'CONFIRMED';
+        if (session.state !== 'PAID' && session.state !== 'CANCELLED') {
+          session.state = 'CONFIRMED';
+        }
         session.razorpayPaymentLinkId = plink.id;
         console.log(`[Checkout] Session completed (escalated): ${session.sessionId} -> ${plink.id}`);
 
-        return res.status(202).json({
+        const body = {
           session_id: session.sessionId,
-          state: 'CONFIRMED',
+          state: session.state,
           approval: {
             type: 'payment_link',
             url: plink.short_url,
             payment_link_id: plink.id,
           },
-          next: 'await_human_then_webhook',
-        });
+          next: session.state === 'PAID' ? 'none' : 'await_human_then_webhook',
+        };
+        (session._completionByKey || (session._completionByKey = {}))[idempotencyKey] = { statusCode: 202, body };
+        return res.status(202).json(body);
       }
     } catch (err) {
       if (err.name === 'IdempotencyKeyError') {
