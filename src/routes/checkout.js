@@ -13,8 +13,7 @@
  * All response shapes conform to docs/ACP_ENDPOINT_SCHEMAS.md.
  *
  * State is held in an in-memory Map for now (swapped for a DB on Day 5+).
- * The /complete endpoint does NOT call Razorpay today — it validates the
- * schema, records the mandate, and returns a simulated success response.
+ * The /complete endpoint calls the live Razorpay test-mode API and handles idempotency.
  */
 
 const crypto = require('crypto');
