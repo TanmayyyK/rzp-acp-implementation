@@ -42,14 +42,13 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const idempotencyKey = req.headers['idempotency-key'];
+
 
     const order = await razorpayClient.createOrder({
       amount,
       currency: currency || config.currency,
       receipt,
       notes: notes || {},
-      idempotencyKey,
     });
 
     console.log(`[Orders] Razorpay Order created: ${order.id} (receipt: ${receipt})`);

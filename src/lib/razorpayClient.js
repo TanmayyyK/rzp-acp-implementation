@@ -67,10 +67,9 @@ async function withRetry(fn, { maxRetries = 3, baseDelayMs = 500 } = {}) {
  * @param {string} params.currency      ISO currency code (default INR).
  * @param {string} params.receipt       Our internal order id (ord_xxx).
  * @param {object} [params.notes]       Free-form key-value (max 15).
- * @param {string} [params.idempotencyKey] Forwarded to Razorpay for dedup.
  * @returns {Promise<object>} Razorpay order entity.
  */
-async function createOrder({ amount, currency = 'INR', receipt, notes = {}, idempotencyKey }) {
+async function createOrder({ amount, currency = 'INR', receipt, notes = {} }) {
   const rz = getInstance();
 
   const orderParams = {
@@ -81,6 +80,9 @@ async function createOrder({ amount, currency = 'INR', receipt, notes = {}, idem
     payment_capture: 1, // auto-capture
   };
 
+  // Note: The Razorpay Node SDK does not natively support injecting
+  // X-Idempotency-Key headers per-request. Therefore, idempotency
+  // must be fully managed at the merchant database layer.
   return withRetry(() => rz.orders.create(orderParams));
 }
 

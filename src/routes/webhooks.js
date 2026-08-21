@@ -13,7 +13,7 @@
 
 const express = require('express');
 const { verifyRazorpaySignature } = require('../lib/verifyRazorpaySignature');
-const config = require('../config');
+
 
 const router = express.Router();
 
