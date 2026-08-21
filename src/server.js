@@ -1,143 +1,84 @@
-const express = require('express');
-const crypto = require('crypto');
-const dotenv = require('dotenv');
+'use strict';
 
-dotenv.config();
+/**
+ * server.js — composition root for the Agentic Commerce Platform.
+ *
+ * Architecture (see docs/ARCHITECTURE.md):
+ *   - Webhook route MUST come before express.json() so the raw body
+ *     is preserved as a Buffer for HMAC-SHA256 verification.
+ *   - All other routes use express.json() normally.
+ *   - The app is exported without calling listen() so tests can
+ *     drive it in-process.
+ */
+
+const express = require('express');
+const config = require('./config');
+
+// Route modules
+const webhookRouter = require('./routes/webhooks');
+const ordersRouter = require('./routes/orders');
+const checkoutRouter = require('./routes/checkout');
+const productsRouter = require('./routes/products');
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // ==========================================
-// ACP Discovery Endpoint
-// Protocol: Agent Commerce Protocol (ACP) v2.0
+// 1. ACP Discovery Endpoint (no body parsing needed)
 // ==========================================
-app.get('/.well-known/acp.json', (req, res) => {
-    res.json({
-        "version": "2.0",
-        "name": "Agentic Commerce Node",
-        "description": "Razorpay Buildathon Day 1 Agentic Commerce Platform",
-        // ACP v2.0 capability vocabulary (per the Agent Commerce Protocol spec).
-        "capabilities": [
-            "search",
-            "recommend",
-            "compare",
-            "negotiate",
-            "transact"
-        ],
-        "endpoints": {
-            "checkout": "/api/v1/checkout",
-            "products": "/api/v1/products",
-            "intents": "/api/v1/intents",
-            "webhooks": "/api/v1/webhooks/razorpay"
-        },
-        // The 5-stage checkout session lifecycle defined by ACP v2.0.
-        "checkout_lifecycle": ["CREATED", "CONFIRMED", "PAID", "FULFILLING", "COMPLETED"],
-        "supported_currencies": ["INR"],
-        "supported_protocols": ["ACP-2.0", "AP2"]
-    });
+app.get('/.well-known/acp.json', (_req, res) => {
+  res.json({
+    version: '2.0',
+    name: 'Agentic Commerce Node',
+    description: 'ACP-shaped checkout + AP2-shaped mandates on Razorpay test-mode rails',
+    capabilities: ['search', 'recommend', 'compare', 'negotiate', 'transact'],
+    endpoints: {
+      products: '/api/v1/products',
+      checkout_sessions: '/api/v1/checkout/sessions',
+      webhooks: '/api/v1/webhooks/razorpay',
+    },
+    checkout_lifecycle: ['CREATED', 'CONFIRMED', 'PAID', 'FULFILLING', 'COMPLETED'],
+    supported_currencies: ['INR'],
+    supported_protocols: ['ACP-2.0', 'AP2'],
+  });
 });
 
 // ==========================================
-// Middleware: Razorpay Webhook Raw Body Capture
+// 2. Webhook route — raw body, BEFORE express.json()
 // ==========================================
-// To validate Razorpay webhooks, the raw request body must be used to generate the HMAC-SHA256 signature.
-// Parsing it to JSON before validation will alter the structure/formatting and fail the signature check.
-const razorpayWebhookMiddleware = express.raw({ type: 'application/json' });
-
-app.post('/api/v1/webhooks/razorpay', razorpayWebhookMiddleware, (req, res) => {
-    try {
-        const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-        const razorpaySignature = req.headers['x-razorpay-signature'];
-        
-        if (!webhookSecret) {
-            console.error('RAZORPAY_WEBHOOK_SECRET is not configured');
-            return res.status(500).send('Webhook secret not configured');
-        }
-
-        if (!razorpaySignature) {
-            return res.status(400).send('Missing Razorpay signature header');
-        }
-
-        // The req.body is a Buffer since we used express.raw
-        // Native Node.js crypto module utilized for HMAC-SHA256 webhook signature validation
-        const expectedSignature = crypto
-            .createHmac('sha256', webhookSecret)
-            .update(req.body)
-            .digest();
-
-        // Constant-time comparison to avoid leaking the signature via timing side-channel.
-        // crypto.timingSafeEqual throws on unequal-length buffers, so length is checked first.
-        const receivedSignature = Buffer.from(razorpaySignature, 'hex');
-        const signatureValid =
-            expectedSignature.length === receivedSignature.length &&
-            crypto.timingSafeEqual(expectedSignature, receivedSignature);
-
-        if (!signatureValid) {
-            console.warn('Invalid Razorpay webhook signature detected.');
-            return res.status(400).send('Invalid signature');
-        }
-
-        // Signature is valid, now we can parse the JSON
-        const event = JSON.parse(req.body.toString('utf8'));
-        console.log(`[Webhook] Valid event received: ${event.event} [ID: ${event.id}]`);
-
-        // ==========================================
-        // Event Handling & Idempotency
-        // ==========================================
-        // Note: Implement idempotency here by checking if event.id has already been processed
-        // before executing state mutations.
-
-        switch (event.event) {
-            case 'order.paid':
-                console.log(`Order paid: ${event.payload.order.entity.id}`);
-                // TODO: Update local order state
-                break;
-            case 'payment.captured':
-                console.log(`Payment captured: ${event.payload.payment.entity.id}`);
-                // TODO: Fulfill the order
-                break;
-            default:
-                console.log(`Unhandled webhook event type: ${event.event}`);
-        }
-
-        res.status(200).send({ status: 'success' });
-    } catch (error) {
-        console.error('Error processing Razorpay webhook:', error);
-        // Do not leak error details to the webhook sender
-        res.status(500).send('Internal Server Error');
-    }
-});
+app.use('/api/v1/webhooks/razorpay', express.raw({ type: 'application/json' }), webhookRouter);
 
 // ==========================================
-// General Application Middleware
+// 3. JSON body parser for everything else
 // ==========================================
-// For all other routes, parse JSON normally.
 app.use(express.json());
 
-// Example route demonstrating idempotency key checking placeholder
-app.post('/api/v1/checkout/complete', (req, res) => {
-    const idempotencyKey = req.headers['idempotency-key'];
-    
-    if (!idempotencyKey) {
-        return res.status(400).json({ error: 'idempotency-key header is required' });
-    }
+// ==========================================
+// 4. Application routes
+// ==========================================
+app.use('/api/v1/products', productsRouter);
+app.use('/api/v1/orders', ordersRouter);
+app.use('/api/v1/checkout', checkoutRouter);
 
-    // TODO: Implement idempotency check using Redis or Postgres
-    // if (await isIdempotencyKeyProcessed(idempotencyKey)) {
-    //    return res.status(200).json(await getCachedResponse(idempotencyKey));
-    // }
-
-    res.json({ message: "Checkout complete endpoint placeholder" });
+// ==========================================
+// 5. Health check
+// ==========================================
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Only bind a port when run directly (`node src/server.js`), so the app can be
-// imported by tests/harnesses without starting a listener.
+// ==========================================
+// Start server only when run directly
+// ==========================================
 if (require.main === module) {
-    app.listen(port, () => {
-        console.log(`🚀 Agentic Commerce Platform listening on port ${port}`);
-        console.log(`🔍 ACP Discovery: http://localhost:${port}/.well-known/acp.json`);
-        console.log(`🪝 Webhooks URL: http://localhost:${port}/api/v1/webhooks/razorpay`);
-    });
+  const port = config.port;
+  app.listen(port, () => {
+    console.log(`🚀 Agentic Commerce Platform listening on port ${port}`);
+    console.log(`🔍 ACP Discovery: http://localhost:${port}/.well-known/acp.json`);
+    console.log(`🪝 Webhooks:      http://localhost:${port}/api/v1/webhooks/razorpay`);
+    console.log(`📦 Products:      http://localhost:${port}/api/v1/products`);
+    console.log(`💳 Orders:        http://localhost:${port}/api/v1/orders`);
+    console.log(`🛒 Checkout:      http://localhost:${port}/api/v1/checkout/sessions`);
+  });
 }
 
 module.exports = app;
