@@ -24,6 +24,14 @@ const config = {
 
   // Default currency
   currency: 'INR',
+
+  // Identity the buyer agent asserts in its attestation header (ADR-008).
+  // Shared so the agent and the grant-issuing route name the same agent
+  // instead of each hardcoding a literal that could drift apart.
+  agentId: process.env.AGENT_ID || 'buyer_agent_1',
+
+  // How long a human's delegation grant stays valid before it must be re-signed.
+  delegationGrantTtlMs: parseInt(process.env.DELEGATION_GRANT_TTL_MS, 10) || 30 * 60 * 1000,
 };
 
 module.exports = config;

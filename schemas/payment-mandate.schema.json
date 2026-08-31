@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ap2.dev/schemas/payment-mandate.schema.json",
+  "title": "PaymentMandate",
+  "description": "Final authorization to move funds against a specific locked CartMandate.",
+  "type": "object",
+  "properties": {
+    "mandate_type": {
+      "const": "PaymentMandate"
+    },
+    "payment_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this payment mandate."
+    },
+    "cart_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Reference to the CartMandate.cart_id being paid for."
+    },
+    "intent_reference": {
+      "type": "string",
+      "format": "uuid",
+      "description": "intent_id of the originating IntentMandate, carried through for auditability."
+    },
+    "final_paise": {
+      "type": "integer",
+      "description": "Final authorized payment amount, in paise. Should equal the cart's total_paise.",
+      "exclusiveMinimum": 0
+    },
+    "payment_method": {
+      "type": "string",
+      "enum": ["UPI", "CARD", "NETBANKING", "WALLET"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "contentEncoding": "base64"
+    }
+  },
+  "required": [
+    "mandate_type",
+    "payment_id",
+    "cart_id",
+    "intent_reference",
+    "final_paise",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

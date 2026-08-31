@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ap2.dev/schemas/intent-mandate.schema.json",
+  "title": "IntentMandate",
+  "description": "A user-authorized spending intent: the outer bound an agent may act within before any cart exists.",
+  "type": "object",
+  "properties": {
+    "mandate_type": {
+      "const": "IntentMandate"
+    },
+    "intent_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this intent mandate."
+    },
+    "max_paise": {
+      "type": "integer",
+      "description": "Maximum amount, in paise (1/100 INR), this intent authorizes.",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000000000
+    },
+    "expiry_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp after which this intent is no longer valid."
+    },
+    "allowed_categories": {
+      "type": "array",
+      "description": "Merchant/product category slugs this intent may be spent against.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{1,63}$"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this mandate was issued."
+    },
+    "signature": {
+      "type": "string",
+      "description": "Optional base64-encoded signature of the mandate payload by the user's agent/key.",
+      "contentEncoding": "base64"
+    }
+  },
+  "required": [
+    "mandate_type",
+    "intent_id",
+    "max_paise",
+    "expiry_timestamp",
+    "allowed_categories",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

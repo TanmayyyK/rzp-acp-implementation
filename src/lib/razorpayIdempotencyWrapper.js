@@ -104,7 +104,7 @@ function isNetworkError(err) {
  * @param {Object} [options]
  * @param {number} [options.ttlMs=86400000] - How long a cache entry stays valid.
  * @returns {{
- *   execute: (key: string, requestFn: () => Promise<*>) => Promise<*>,
+ *   execute: (key: string, requestFn: () => Promise<*>, options?: { scope?: string }) => Promise<*>,
  *   getStatus: (key: string) => ('in_progress'|'success'|'failed'|undefined),
  *   clear: () => void,
  *   size: () => number,
@@ -142,9 +142,15 @@ function createIdempotencyWrapper(options = {}) {
    *
    * @param {string} key - Idempotency key (see `isValidIdempotencyKey`).
    * @param {() => Promise<*>} requestFn - Performs the actual Razorpay call.
+   * @param {Object} [options]
+   * @param {string} [options.scope] - Namespace the cache entry under a
+   *   server-controlled scope (e.g. a checkout session_id). A client-supplied
+   *   idempotency key is only guaranteed unique WITHIN such a scope, so the
+   *   same key replayed against a different scope must not return the first
+   *   scope's cached response. Omit for a globally-keyed entry (legacy).
    * @returns {Promise<*>} The (possibly cached) response.
    */
-  async function execute(key, requestFn) {
+  async function execute(key, requestFn, options = {}) {
     if (!isValidIdempotencyKey(key)) {
       throw new IdempotencyKeyError(`Invalid idempotency key: ${JSON.stringify(key)}`);
     }
@@ -152,7 +158,15 @@ function createIdempotencyWrapper(options = {}) {
       throw new TypeError('requestFn must be a function that returns a Promise');
     }
 
-    const existing = readEntry(key);
+    // A client-supplied idempotency key is only unique within its caller scope
+    // (e.g. one checkout session). Namespacing the cache key by the
+    // server-controlled scope stops a key replayed across sessions from
+    // returning another session's cached Razorpay order. The raw `key` is what
+    // gets validated above; `scope` is trusted (never client-derived).
+    const scope = typeof options.scope === 'string' && options.scope.length > 0 ? options.scope : '';
+    const cacheKey = scope ? `${scope}::${key}` : key;
+
+    const existing = readEntry(cacheKey);
 
     if (existing) {
       if (existing.status === 'success') {
@@ -169,7 +183,7 @@ function createIdempotencyWrapper(options = {}) {
     const promise = (async () => {
       try {
         const response = await requestFn();
-        cache.set(key, {
+        cache.set(cacheKey, {
           status: 'success',
           response,
           createdAt: startedAt,
@@ -183,9 +197,9 @@ function createIdempotencyWrapper(options = {}) {
         if (retryable) {
           // Unknown outcome on Razorpay's side — don't leave a stale
           // "in_progress" entry blocking a legitimate retry.
-          cache.delete(key);
+          cache.delete(cacheKey);
         } else {
-          cache.set(key, {
+          cache.set(cacheKey, {
             status: 'failed',
             error: { name: err && err.name, message: err && err.message },
             createdAt: startedAt,
@@ -203,7 +217,7 @@ function createIdempotencyWrapper(options = {}) {
 
     // Recorded synchronously (before this function yields) so a
     // concurrent call with the same key can find and await it.
-    cache.set(key, {
+    cache.set(cacheKey, {
       status: 'in_progress',
       promise,
       createdAt: startedAt,

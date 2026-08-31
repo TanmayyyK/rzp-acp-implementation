@@ -1,34 +1,70 @@
 'use strict';
 
+/**
+ * Surface-level contracts for the app as a whole: ACP discovery, health, the
+ * products catalogue, webhook signature verification, and the two guards that
+ * sit in front of every /complete call.
+ *
+ * Driven socket-free via tests/helpers/inject.js. This suite used to use
+ * supertest, which calls app.listen() — blocked in this sandbox (EPERM), and an
+ * unhandled 'error' on the Server crashes the whole jest process, so the entire
+ * gate went dark rather than reporting one failure.
+ */
+
 const crypto = require('crypto');
-const request = require('supertest');
-const app = require('../src/server');
+const { inject } = require('./helpers/inject');
 
 const SECRET = 'test_webhook_secret_123';
 
-// Set the env var before requiring the app (config reads it once)
+// webhooks.js reads process.env per request, so setting it here is enough.
 beforeAll(() => {
   process.env.RAZORPAY_WEBHOOK_SECRET = SECRET;
 });
 
+const app = require('../src/server');
+
 function signBody(body, secret) {
   return crypto.createHmac('sha256', secret).update(body).digest('hex');
+}
+
+function get(url) {
+  return inject(app, { method: 'GET', url });
+}
+
+function post(url, { headers, body } = {}) {
+  return inject(app, { method: 'POST', url, headers, body });
+}
+
+/** A distinct event id per run: dedup is persisted, so fixed ids are not idempotent. */
+function eventId(tag) {
+  return `evt_${tag}_${crypto.randomBytes(6).toString('hex')}`;
 }
 
 // ===================== ACP Discovery =====================
 
 describe('GET /.well-known/acp.json', () => {
   test('returns 200 with ACP v2.0 manifest', async () => {
-    const res = await request(app).get('/.well-known/acp.json');
-    expect(res.statusCode).toBe(200);
+    const res = await get('/.well-known/acp.json');
+    expect(res.status).toBe(200);
     expect(res.body.version).toBe('2.0');
     expect(res.body.supported_protocols).toContain('ACP-2.0');
     expect(res.body.supported_protocols).toContain('AP2');
     expect(res.body.checkout_lifecycle).toEqual([
       'CREATED', 'CONFIRMED', 'PAID', 'FULFILLING', 'COMPLETED',
     ]);
-    expect(res.body.endpoints.feed).toBe('/api/v1/feed');
+    expect(res.body.endpoints.products).toBe('/api/v1/products');
     expect(res.body.endpoints.checkout_sessions).toBe('/api/v1/checkout/sessions');
+  });
+
+  test('does not advertise the removed product feed', async () => {
+    // Discovery is a contract: an agent reads this document and calls what it
+    // finds. /api/v1/feed and its mock catalogue were deleted in favour of the
+    // DB-backed products route, so leaving the entry here is a 404 the agent
+    // cannot diagnose.
+    const { endpoints } = (await get('/.well-known/acp.json')).body;
+    expect(endpoints.feed).toBeUndefined();
+    expect((await get('/api/v1/feed')).status).toBe(404);
+    expect((await get(endpoints.products)).status).toBe(200);
   });
 });
 
@@ -36,8 +72,8 @@ describe('GET /.well-known/acp.json', () => {
 
 describe('GET /health', () => {
   test('returns 200 with ok status', async () => {
-    const res = await request(app).get('/health');
-    expect(res.statusCode).toBe(200);
+    const res = await get('/health');
+    expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
   });
 });
@@ -46,37 +82,41 @@ describe('GET /health', () => {
 
 describe('Products API', () => {
   test('GET /api/v1/products returns all products', async () => {
-    const res = await request(app).get('/api/v1/products');
-    expect(res.statusCode).toBe(200);
+    const res = await get('/api/v1/products');
+    expect(res.status).toBe(200);
     expect(res.body.products.length).toBeGreaterThan(0);
     expect(res.body.count).toBe(res.body.products.length);
   });
 
   test('GET /api/v1/products?category=audio filters by category', async () => {
-    const res = await request(app).get('/api/v1/products?category=audio');
-    expect(res.statusCode).toBe(200);
+    const res = await get('/api/v1/products?category=audio');
+    expect(res.status).toBe(200);
+    expect(res.body.products.length).toBeGreaterThan(0);
     res.body.products.forEach((p) => {
       expect(p.category).toBe('audio');
     });
   });
 
   test('GET /api/v1/products?max_price=300000 filters by price', async () => {
-    const res = await request(app).get('/api/v1/products?max_price=300000');
-    expect(res.statusCode).toBe(200);
+    const res = await get('/api/v1/products?max_price=300000');
+    expect(res.status).toBe(200);
+    expect(res.body.products.length).toBeGreaterThan(0);
     res.body.products.forEach((p) => {
       expect(p.price).toBeLessThanOrEqual(300000);
     });
   });
 
   test('GET /api/v1/products/:sku returns a single product', async () => {
-    const res = await request(app).get('/api/v1/products/SKU-AUDIO-001');
-    expect(res.statusCode).toBe(200);
-    expect(res.body.sku).toBe('SKU-AUDIO-001');
+    const res = await get('/api/v1/products/prod_elec_002');
+    expect(res.status).toBe(200);
+    expect(res.body.sku).toBe('prod_elec_002');
+    expect(res.body.id).toBe('prod_elec_002');
+    expect(Number.isInteger(res.body.price)).toBe(true);
   });
 
   test('GET /api/v1/products/:sku returns 404 for unknown SKU', async () => {
-    const res = await request(app).get('/api/v1/products/SKU-NONEXISTENT');
-    expect(res.statusCode).toBe(404);
+    const res = await get('/api/v1/products/prod_nonexistent');
+    expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('PRODUCT_NOT_FOUND');
   });
 });
@@ -84,65 +124,64 @@ describe('Products API', () => {
 // ===================== Webhook =====================
 
 describe('Webhook signature verification', () => {
-  const PAYLOAD_STR = '{"event":"payment.captured","id":"evt_test_001","payload":{"payment":{"entity":{"id":"pay_abc"}}}}';
+  const headers = (sig) => ({
+    'Content-Type': 'application/json',
+    ...(sig ? { 'x-razorpay-signature': sig } : {}),
+  });
 
-  test('valid signature → 200', async () => {
-    const sig = signBody(PAYLOAD_STR, SECRET);
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', sig)
-      .send(PAYLOAD_STR);
-    expect(res.statusCode).toBe(200);
+  test('valid signature -> 200', async () => {
+    const payload = JSON.stringify({
+      event: 'payment.captured',
+      id: eventId('captured'),
+      payload: { payment: { entity: { id: 'pay_abc' } } },
+    });
+    const res = await post('/api/v1/webhooks/razorpay', {
+      headers: headers(signBody(payload, SECRET)),
+      body: payload,
+    });
+    expect(res.status).toBe(200);
     expect(res.body.status).toBe('success');
   });
 
-  test('missing signature → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .send(PAYLOAD_STR);
-    expect(res.statusCode).toBe(400);
+  test('missing signature -> 400', async () => {
+    const payload = JSON.stringify({ event: 'payment.captured', id: eventId('nosig') });
+    const res = await post('/api/v1/webhooks/razorpay', { headers: headers(null), body: payload });
+    expect(res.status).toBe(400);
   });
 
-  test('tampered body → 400', async () => {
-    const sig = signBody(PAYLOAD_STR, SECRET);
-    const tampered = '{"event":"payment.captured","id":"tampered"}';
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', sig)
-      .send(tampered);
-    expect(res.statusCode).toBe(400);
+  test('tampered body -> 400', async () => {
+    const payload = JSON.stringify({ event: 'payment.captured', id: eventId('tamper') });
+    const sig = signBody(payload, SECRET);
+    const res = await post('/api/v1/webhooks/razorpay', {
+      headers: headers(sig),
+      body: '{"event":"payment.captured","id":"tampered"}',
+    });
+    expect(res.status).toBe(400);
   });
 
-  test('wrong signature → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', 'deadbeef')
-      .send(PAYLOAD_STR);
-    expect(res.statusCode).toBe(400);
+  test('wrong signature -> 400', async () => {
+    const payload = JSON.stringify({ event: 'payment.captured', id: eventId('wrongsig') });
+    const res = await post('/api/v1/webhooks/razorpay', {
+      headers: headers('deadbeef'),
+      body: payload,
+    });
+    expect(res.status).toBe(400);
   });
 
-  test('duplicate event id → already_processed', async () => {
-    const payload2 = '{"event":"order.paid","id":"evt_test_dedup","payload":{"order":{"entity":{"id":"order_123"}}}}';
-    const sig = signBody(payload2, SECRET);
+  test('duplicate event id -> already_processed', async () => {
+    const payload = JSON.stringify({
+      event: 'order.paid',
+      id: eventId('dedup'),
+      payload: { order: { entity: { id: 'order_123' } } },
+    });
+    const sig = signBody(payload, SECRET);
 
-    // First call
-    await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', sig)
-      .send(payload2);
+    const first = await post('/api/v1/webhooks/razorpay', { headers: headers(sig), body: payload });
+    expect(first.status).toBe(200);
+    expect(first.body.status).toBe('success');
 
-    // Second call — same event id
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', sig)
-      .send(payload2);
-    expect(res.statusCode).toBe(200);
+    const res = await post('/api/v1/webhooks/razorpay', { headers: headers(sig), body: payload });
+    expect(res.status).toBe(200);
     expect(res.body.status).toBe('already_processed');
   });
 });
@@ -150,20 +189,18 @@ describe('Webhook signature verification', () => {
 // ===================== Checkout idempotency =====================
 
 describe('Checkout session lifecycle', () => {
-  test('POST /complete without idempotency-key → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions/fake_id/complete')
-      .send({});
-    expect(res.statusCode).toBe(400);
+  test('POST /complete without Idempotency-Key -> 400', async () => {
+    const res = await post('/api/v1/checkout/sessions/fake_id/complete', { body: {} });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('IDEMPOTENCY_KEY_MISSING');
   });
 
-  test('POST /complete with idempotency-key but fake session → 404', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions/fake_id/complete')
-      .set('Idempotency-Key', 'idem_test_001')
-      .send({});
-    expect(res.statusCode).toBe(404);
+  test('POST /complete with Idempotency-Key but fake session -> 404', async () => {
+    const res = await post('/api/v1/checkout/sessions/fake_id/complete', {
+      headers: { 'Idempotency-Key': 'idem_test_001' },
+      body: {},
+    });
+    expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 });
@@ -171,35 +208,27 @@ describe('Checkout session lifecycle', () => {
 // ===================== Orders (validation only, no live Razorpay) =====================
 
 describe('Orders validation', () => {
-  test('POST /api/v1/orders without amount → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/orders')
-      .send({ receipt: 'ord_test_001' });
-    expect(res.statusCode).toBe(400);
+  test('POST /api/v1/orders without amount -> 400', async () => {
+    const res = await post('/api/v1/orders', { body: { receipt: 'ord_test_001' } });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_AMOUNT');
   });
 
-  test('POST /api/v1/orders with float amount → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/orders')
-      .send({ amount: 749.99, receipt: 'ord_test_002' });
-    expect(res.statusCode).toBe(400);
+  test('POST /api/v1/orders with float amount -> 400', async () => {
+    const res = await post('/api/v1/orders', { body: { amount: 749.99, receipt: 'ord_test_002' } });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_AMOUNT');
   });
 
-  test('POST /api/v1/orders without receipt → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/orders')
-      .send({ amount: 749900 });
-    expect(res.statusCode).toBe(400);
+  test('POST /api/v1/orders without receipt -> 400', async () => {
+    const res = await post('/api/v1/orders', { body: { amount: 749900 } });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('MISSING_RECEIPT');
   });
 
-  test('POST /api/v1/orders/link without description → 400', async () => {
-    const res = await request(app)
-      .post('/api/v1/orders/link')
-      .send({ amount: 749900 });
-    expect(res.statusCode).toBe(400);
+  test('POST /api/v1/orders/link without description -> 400', async () => {
+    const res = await post('/api/v1/orders/link', { body: { amount: 749900 } });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('MISSING_DESCRIPTION');
   });
 });

@@ -5,7 +5,10 @@
       "Bash(node -e ' *)",
       "Bash(echo \"exit: $?\")",
       "WebFetch(domain:developers.cresva.ai)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(node --check public/js/inspector.js)",
+      "Bash(node --check src/server.js)",
+      "Bash(graphify update *)"
     ]
   }
 }

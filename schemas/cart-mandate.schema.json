@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ap2.dev/schemas/cart-mandate.schema.json",
+  "title": "CartMandate",
+  "description": "A price-locked cart built by a merchant/agent under a prior IntentMandate.",
+  "type": "object",
+  "$defs": {
+    "LineItem": {
+      "type": "object",
+      "properties": {
+        "sku": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "unit_price_paise": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "line_total_paise": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Must equal quantity * unit_price_paise; enforced at runtime, not by JSON Schema."
+        },
+        "locked": {
+          "const": true,
+          "description": "Line items in a CartMandate are immutable once mandated; always true."
+        }
+      },
+      "required": [
+        "sku",
+        "description",
+        "quantity",
+        "unit_price_paise",
+        "line_total_paise",
+        "locked"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "mandate_type": {
+      "const": "CartMandate"
+    },
+    "cart_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this cart mandate."
+    },
+    "intent_reference": {
+      "type": "string",
+      "format": "uuid",
+      "description": "intent_id of the IntentMandate this cart was built under."
+    },
+    "line_items": {
+      "type": "array",
+      "description": "Locked, price-immutable line items making up this cart.",
+      "items": { "$ref": "#/$defs/LineItem" },
+      "minItems": 1
+    },
+    "total_paise": {
+      "type": "integer",
+      "description": "Sum of all line_total_paise values, in paise. Verified at runtime.",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "contentEncoding": "base64"
+    }
+  },
+  "required": [
+    "mandate_type",
+    "cart_id",
+    "intent_reference",
+    "line_items",
+    "total_paise",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

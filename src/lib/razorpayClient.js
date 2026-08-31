@@ -34,6 +34,15 @@ function getInstance() {
   return instance;
 }
 
+class RazorpayRequestError extends Error {
+  constructor(message, retryable, originalError) {
+    super(message);
+    this.name = 'RazorpayRequestError';
+    this.retryable = retryable;
+    this.originalError = originalError;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Exponential backoff wrapper (ADR-007)
 // ---------------------------------------------------------------------------
@@ -45,14 +54,20 @@ async function withRetry(fn, { maxRetries = 3, baseDelayMs = 500 } = {}) {
     } catch (err) {
       lastError = err;
       const statusCode = err.statusCode || err.status || 0;
-      const retryable = statusCode === 429 || statusCode >= 500;
-      if (!retryable || attempt === maxRetries) throw err;
+      const retryable = statusCode === 429 || statusCode >= 500 || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT';
+      if (!retryable || attempt === maxRetries) {
+        throw new RazorpayRequestError(
+          err.message || 'Razorpay request failed',
+          retryable,
+          err
+        );
+      }
 
       const delay = baseDelayMs * Math.pow(2, attempt);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
-  throw lastError;
+  throw new RazorpayRequestError(lastError.message, true, lastError);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +169,7 @@ module.exports = {
   createPaymentLink,
   fetchOrder,
   cancelPaymentLink,
+  RazorpayRequestError,
   // Exported for testing
   _withRetry: withRetry,
 };

@@ -1,0 +1,2 @@
+sed -i '' -e "s/.post(\`\/api\/v1\/checkout\/sessions\/\${created.body.session_id}\/complete\`)/.post(\`\/api\/v1\/checkout\/sessions\/\${created.body.session_id}\/complete\`).set('Cookie', ['connect.sid=s%3Atest.sig'])/g" tests/checkout.test.js
+sed -i '' -e "s/.post(\`\/api\/v1\/checkout\/sessions\/\${sessionId}\/complete\`)/.post(\`\/api\/v1\/checkout\/sessions\/\${sessionId}\/complete\`).set('Cookie', ['connect.sid=s%3Atest.sig'])/g" tests/checkout.test.js

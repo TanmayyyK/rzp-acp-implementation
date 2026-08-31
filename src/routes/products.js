@@ -1,107 +1,80 @@
 'use strict';
 
-/**
- * Products route — ACP product feed.
- *
- * GET /api/v1/products       — list all products
- * GET /api/v1/products/:sku  — single product by SKU
- *
- * Backed by a hardcoded catalog for Day 2. Will swap for DB on Day 3.
- */
-
 const express = require('express');
 const router = express.Router();
-
-// Hardcoded catalog — amounts in paise (ADR-004)
-const CATALOG = [
-  {
-    sku: 'SKU-AUDIO-001',
-    title: 'Acme NC-700 Headphones',
-    description: 'Over-ear noise-cancelling wireless headphones with 30hr battery.',
-    price: 749900,
-    currency: 'INR',
-    availability: 'in_stock',
-    category: 'audio',
-    images: ['https://example.com/img/nc700-1.jpg'],
-    eligibility: { agent_purchasable: true },
-  },
-  {
-    sku: 'SKU-AUDIO-002',
-    title: 'Acme Buds Pro',
-    description: 'True wireless earbuds with active noise cancellation.',
-    price: 249900,
-    currency: 'INR',
-    availability: 'in_stock',
-    category: 'audio',
-    images: ['https://example.com/img/buds-pro-1.jpg'],
-    eligibility: { agent_purchasable: true },
-  },
-  {
-    sku: 'SKU-ELEC-001',
-    title: 'Acme SmartWatch X',
-    description: 'Fitness smartwatch with GPS, heart rate monitor, 7-day battery.',
-    price: 1499900,
-    currency: 'INR',
-    availability: 'in_stock',
-    category: 'electronics',
-    images: ['https://example.com/img/smartwatch-x-1.jpg'],
-    eligibility: { agent_purchasable: true },
-  },
-  {
-    sku: 'SKU-ELEC-002',
-    title: 'Acme USB-C Hub',
-    description: '7-in-1 USB-C hub with HDMI, USB-A, SD card reader.',
-    price: 349900,
-    currency: 'INR',
-    availability: 'in_stock',
-    category: 'electronics',
-    images: ['https://example.com/img/usbc-hub-1.jpg'],
-    eligibility: { agent_purchasable: true },
-  },
-];
+const db = require('../db');
 
 // GET /api/v1/products
 router.get('/', (req, res) => {
   const { category, max_price, query } = req.query;
-  let results = CATALOG;
-
+  
+  let sql = 'SELECT * FROM products WHERE 1=1';
+  const params = [];
+  
   if (category) {
-    results = results.filter((p) => p.category === category);
+    sql += ' AND category = ?';
+    params.push(category);
   }
+  
   if (max_price) {
     const maxPaise = parseInt(max_price, 10);
     if (!isNaN(maxPaise)) {
-      results = results.filter((p) => p.price <= maxPaise);
+      sql += ' AND price_paise <= ?';
+      params.push(maxPaise);
     }
   }
+  
   if (query) {
-    const q = query.toLowerCase();
-    results = results.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q)
-    );
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+    for (const word of words) {
+      sql += ' AND (LOWER(title) LIKE ? OR LOWER(description) LIKE ?)';
+      const likeQuery = `%${word}%`;
+      params.push(likeQuery, likeQuery);
+    }
   }
+  
+  sql += ' LIMIT 15';
+  const results = db.prepare(sql).all(params).map(row => ({
+    id: row.id,
+    sku: row.id, // Backwards compatibility
+    title: row.title,
+    description: row.description,
+    price: row.price_paise,
+    currency: row.currency,
+    availability: row.availability === 1,
+    category: row.category,
+    images: row.image_url ? [row.image_url] : [],
+    eligibility: { agent_purchasable: true },
+  }));
 
   res.json({ products: results, count: results.length });
 });
 
-// GET /api/v1/products/:sku
-router.get('/:sku', (req, res) => {
-  const product = CATALOG.find((p) => p.sku === req.params.sku);
-  if (!product) {
+// GET /api/v1/products/:id
+router.get('/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) {
     return res.status(404).json({
       error: {
         code: 'PRODUCT_NOT_FOUND',
-        message: `No product with SKU ${req.params.sku}`,
+        message: `No product with ID ${req.params.id}`,
         retriable: false,
       },
     });
   }
-  res.json(product);
+  
+  res.json({
+    id: row.id,
+    sku: row.id,
+    title: row.title,
+    description: row.description,
+    price: row.price_paise,
+    currency: row.currency,
+    availability: row.availability === 1,
+    category: row.category,
+    images: row.image_url ? [row.image_url] : [],
+    eligibility: { agent_purchasable: true },
+  });
 });
-
-// Exported for testing
-router._CATALOG = CATALOG;
 
 module.exports = router;

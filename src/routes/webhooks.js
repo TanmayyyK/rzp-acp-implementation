@@ -12,7 +12,12 @@
  */
 
 const express = require('express');
+const { transitionSession } = require('../lib/sessionStateMachine');
 const { verifyRazorpaySignature } = require('../lib/verifyRazorpaySignature');
+// Shared hash-chained audit trail (ADR-005). A verified, first-seen webhook is a
+// real transaction event, so record it here — this is what surfaces it in the
+// dashboard Inspector's feed instead of it vanishing into console.log.
+const { sharedAuditLog, EventType, Actor } = require('../lib/auditLog');
 
 
 const router = express.Router();
@@ -52,14 +57,26 @@ router.post('/', (req, res) => {
 
     // Signature valid — parse JSON
     const event = JSON.parse(rawBody.toString('utf8'));
-    console.log(`[Webhook] Valid event received: ${event.event} [ID: ${event.id}]`);
 
     // Idempotency — deduplicate on event.id (ADR-007)
     if (processedEventIds.has(event.id)) {
-      console.log(`[Webhook] Duplicate event ${event.id}, skipping.`);
       return res.status(200).json({ status: 'already_processed' });
     }
     processedEventIds.add(event.id);
+
+    // Audit the verified, first-seen webhook on the shared chain (best-effort
+    // session correlation from the entity notes). Placed after the idempotency
+    // guard so a duplicate delivery does not double-log.
+    const entity =
+      (event.payload && event.payload.order && event.payload.order.entity) ||
+      (event.payload && event.payload.payment && event.payload.payment.entity) ||
+      null;
+    sharedAuditLog.append({
+      session_id: entity && entity.notes ? entity.notes.session_id || null : null,
+      actor: Actor.RAZORPAY,
+      event_type: EventType.WEBHOOK_RECEIVED,
+      payload: { event: event.event, id: event.id },
+    });
 
     // Dispatch by event type
     const checkoutRouter = require('./checkout');
@@ -69,14 +86,14 @@ router.post('/', (req, res) => {
       case 'order.paid': {
         const orderEntity = event.payload.order.entity;
         const sessionId = orderEntity.notes && orderEntity.notes.session_id;
-        console.log(`[Webhook] Order paid: ${orderEntity.id}`);
         
         const session = sessionId ? sessionsMap.get(sessionId) : null;
-        if (session && ['CREATED', 'PROCESSING', 'CONFIRMED'].includes(session.state)) {
-          session.state = 'PAID';
+        if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
+          if (session.state === 'CREATED') {
+            Object.assign(session, transitionSession(session, 'CONFIRMED'));
+          }
+          Object.assign(session, transitionSession(session, 'PAID'));
           session.razorpayOrderId = orderEntity.id; // Catch up in case the webhook beat the POST /complete response
-          session.updatedAt = new Date().toISOString();
-          console.log(`[Webhook] Session ${sessionId} transitioned to PAID`);
         } else if (!session) {
           console.warn(`[Webhook] Session not found for order ${orderEntity.id}`);
         }
@@ -85,30 +102,28 @@ router.post('/', (req, res) => {
       case 'payment.captured': {
         const paymentEntity = event.payload.payment.entity;
         const sessionId = paymentEntity.notes && paymentEntity.notes.session_id;
-        console.log(`[Webhook] Payment captured: ${paymentEntity.id}`);
         
         const session = sessionId ? sessionsMap.get(sessionId) : null;
-        if (session && ['CREATED', 'PROCESSING', 'CONFIRMED'].includes(session.state)) {
-          session.state = 'PAID';
+        if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
+          if (session.state === 'CREATED') {
+            Object.assign(session, transitionSession(session, 'CONFIRMED'));
+          }
+          Object.assign(session, transitionSession(session, 'PAID'));
           session.razorpayPaymentId = paymentEntity.id;
           if (paymentEntity.order_id) {
             session.razorpayOrderId = paymentEntity.order_id;
           } else {
             session.razorpayPaymentLinkId = paymentEntity.invoice_id; // Payment links use invoice_id internally
           }
-          session.updatedAt = new Date().toISOString();
-          console.log(`[Webhook] Session ${sessionId} transitioned to PAID with payment ${paymentEntity.id}`);
         } else if (!session) {
           console.warn(`[Webhook] Session not found for payment ${paymentEntity.id}`);
         }
         break;
       }
       case 'payment.failed':
-        console.log(`[Webhook] Payment failed: ${event.payload.payment.entity.id}`);
         // TODO: Drive state machine → FAILED (Day 12)
         break;
       default:
-        console.log(`[Webhook] Unhandled event type: ${event.event}`);
     }
 
     res.status(200).json({ status: 'success' });

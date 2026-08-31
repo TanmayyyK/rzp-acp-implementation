@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Razorpay Agent</title>
+  <meta name="description" content="AI Commerce Agent on Razorpay rails with tamper-evident audit chain." />
+
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('acp-theme');
+        if (t !== 'dark' && t !== 'light') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-brand">
+          
+          <img src="/img/razorpay-logo.svg" alt="Razorpay" class="sidebar-logo logo-light" />
+          <img src="/img/razorpay-logo-dark.svg" alt="Razorpay" class="sidebar-logo logo-dark" />
+
+        </div>
+        <button class="sidebar-new-chat" id="new-chat-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m-7-7h14"/></svg>
+          <span>New chat</span>
+        </button>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Recent</div>
+        <div class="sidebar-history" id="chat-history"></div>
+        <div class="sidebar-empty" id="chat-history-empty">Your chats will appear here. Ask the buyer agent to find or buy something to get started.</div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Security Hub</div>
+        <!-- Rendered by /js/delegation.js: register, authenticate, delegate a
+             spending cap, revoke it, and sign an approval when the agent is
+             refused. Empty here on purpose so the panel owns its own states. -->
+        <div id="security-hub" style="display: flex; flex-direction: column; gap: 8px; padding: 0 16px; margin-top: 12px;"></div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <button class="sidebar-item" id="trust-btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+          <span>Trust Center</span>
+        </button>
+        <button class="sidebar-item" id="theme-toggle" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          <span>Theme</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <header class="topbar">
+        <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        </button>
+        <span class="topbar-title">Razorpay Agent</span>
+        <div class="topbar-actions">
+          <button class="topbar-btn" id="shortcuts-btn" type="button" aria-label="Keyboard shortcuts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+            <span class="topbar-btn-label">Shortcuts</span>
+            <kbd class="kbd-hint">?</kbd>
+          </button>
+        </div>
+      </header>
+
+      <main class="stage">
+        <div id="chat-region" class="chat-region"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Trust Center slide-over -->
+  <div id="trust-backdrop" class="trust-backdrop" hidden></div>
+  <aside id="trust-drawer" class="trust-drawer" role="dialog" aria-modal="true" aria-labelledby="trust-title" aria-hidden="true"></aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/js/store.js"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/webauthnClient.js"></script>
+  <script src="/js/delegation.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/trust.js"></script>
+  <script src="/js/ui.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      window.Theme.init(document.getElementById('theme-toggle'));
+      window.AuditStore.start(1500);
+      window.ChatPanel.init(document.getElementById('chat-region'));
+      window.UI.init({ shortcutsBtn: document.getElementById('shortcuts-btn') });
+      
+      window.TrustDrawer.init({
+        drawer: document.getElementById('trust-drawer'),
+        backdrop: document.getElementById('trust-backdrop'),
+        openBtn: document.getElementById('trust-btn'),
+      });
+
+      // Every ceremony a human performs lives here. Started after AuditStore so
+      // its subscription picks up the first poll, which is how it learns that a
+      // session is waiting on a signature.
+      window.Delegation.init({ root: document.getElementById('security-hub') });
+
+      // Sidebar toggle
+      var sidebar = document.getElementById('sidebar');
+      document.getElementById('sidebar-toggle').addEventListener('click', function () {
+        sidebar.classList.toggle('is-collapsed');
+      });
+
+      // New chat
+      document.getElementById('new-chat-btn').addEventListener('click', function () {
+        saveChatToHistory();
+        window.ChatPanel.reset();
+      });
+
+      // Chat history
+      function saveChatToHistory() {
+        var historyEl = document.getElementById('chat-history');
+        var msgs = document.querySelectorAll('.bubble-text');
+        if (msgs.length === 0) return;
+        var firstMsg = msgs[0].textContent.slice(0, 38);
+        if (!firstMsg.trim()) return;
+        var item = document.createElement('button');
+        item.className = 'sidebar-history-item';
+        item.textContent = firstMsg + (firstMsg.length >= 38 ? '...' : '');
+        item.title = firstMsg;
+        historyEl.insertBefore(item, historyEl.firstChild);
+      }
+    });
+  </script>
+</body>
+</html>

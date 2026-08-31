@@ -1,104 +1,144 @@
 'use strict';
 
-const request = require('supertest');
-const app = require('../src/server');
-const checkoutRouter = require('../src/routes/checkout');
+/**
+ * Checkout session lifecycle: create, update, read, complete, cancel, aliases.
+ *
+ * This suite used to drive the app with supertest (app.listen — EPERM in this
+ * sandbox) and, more importantly, it was written against the authorization model
+ * that the security audit rejected: every session was opened by POSTing a
+ * self-made `intent_mandate` with `proof.jws: 'stub'`, and /complete was called
+ * with a fabricated `connect.sid` cookie. Both of those ARE the findings — an
+ * agent that can hand over its own IntentMandate is authorizing its own
+ * spending. So the lifecycle assertions are kept and re-pointed at the real
+ * model: a human signs a delegation grant with their authenticator, and the
+ * agent references it by id.
+ *
+ * Runs socket-free over tests/helpers/inject.js.
+ */
 
-// Mock Razorpay client to avoid real API calls during tests
+// Read at request time by /complete; keep every charge on the 200/order path
+// unless a test deliberately lowers it.
+process.env.AUTO_APPROVE_THRESHOLD_PAISE = '100000000';
+
 jest.mock('../src/lib/razorpayClient', () => ({
   createOrder: jest.fn(async (params) => ({ id: 'order_simulated_mock', ...params })),
-  createPaymentLink: jest.fn(async (params) => ({ id: 'plink_simulated_mock', short_url: 'https://rzp.io/i/plink_simulated_mock', ...params })),
+  createPaymentLink: jest.fn(async (params) => ({
+    id: 'plink_simulated_mock', short_url: 'https://rzp.io/i/plink_simulated_mock', ...params,
+  })),
   cancelPaymentLink: jest.fn(async (id) => ({ id, status: 'cancelled' })),
 }));
 
-// Clear the in-memory session store between tests
-beforeEach(() => {
+const crypto = require('crypto');
+
+const app = require('../src/server');
+const db = require('../src/db');
+const checkoutRouter = require('../src/routes/checkout');
+const { resetLedger } = require('../src/lib/velocityTracker');
+const { inject } = require('./helpers/inject');
+const { SoftAuthenticator } = require('./helpers/softAuthenticator');
+
+const PRINCIPAL = 'usr_alice';
+const AGENT_ID = 'buyer_agent_1';
+const CAP_PAISE = 50000000;
+
+const EARBUDS = 'prod_elec_002'; // Boult Z40, ₹1,799
+const POWER_BANK = 'prod_elec_003'; // Mi Power Bank, ₹1,999
+const OUT_OF_STOCK = 'prod_elec_004'; // Razer Huntsman Mini, availability 0
+
+let authenticator;
+let grantId;
+
+// ─── Harness ────────────────────────────────────────────────────────────
+
+function agentHeaders(extra = {}) {
+  const attestation = Buffer.from(
+    JSON.stringify({ agent_id: AGENT_ID, principal_id: PRINCIPAL })
+  ).toString('base64');
+  return { 'X-Agorio-Attestation': attestation, ...extra };
+}
+
+function idempotencyKey() {
+  return `idem_${crypto.randomBytes(6).toString('hex')}`;
+}
+
+function get(url, headers = agentHeaders()) {
+  return inject(app, { method: 'GET', url, headers });
+}
+
+function post(url, body = {}, headers = agentHeaders()) {
+  return inject(app, { method: 'POST', url, headers, body });
+}
+
+function patch(url, body = {}, headers = agentHeaders()) {
+  return inject(app, { method: 'PATCH', url, headers, body });
+}
+
+/** The real ceremony: the server proposes a grant envelope, the human signs it. */
+async function issueGrant() {
+  const gen = await get(`/auth/login/generate?principal_id=${PRINCIPAL}`, {});
+  const verify = await inject(app, {
+    method: 'POST',
+    url: '/auth/login/verify',
+    headers: { Cookie: gen.cookie },
+    body: authenticator.sign(gen.body.challenge),
+  });
+  expect(verify.body).toMatchObject({ verified: true });
+
+  const challenge = await inject(app, {
+    method: 'POST',
+    url: '/api/v1/mandates/intent/challenge',
+    headers: { Cookie: gen.cookie },
+    body: { max_amount_paise: CAP_PAISE },
+  });
+  const issued = await inject(app, {
+    method: 'POST',
+    url: '/api/v1/mandates/intent',
+    headers: { Cookie: gen.cookie },
+    body: {
+      intent_mandate: challenge.body.intent_mandate,
+      assertion: authenticator.sign(challenge.body.webauthn.challenge),
+    },
+  });
+  expect(issued.status).toBe(201);
+  return issued.body.mandate_id;
+}
+
+function createSession(items = [{ sku: EARBUDS, quantity: 1 }]) {
+  return post('/api/v1/checkout/sessions', { intent_mandate_id: grantId, requested_items: items });
+}
+
+function completeSession(sessionId, key = idempotencyKey(), body = {}) {
+  return post(`/api/v1/checkout/sessions/${sessionId}/complete`, body,
+    agentHeaders({ 'Idempotency-Key': key }));
+}
+
+function cancelSession(sessionId) {
+  return post(`/api/v1/checkout/sessions/${sessionId}/cancel`, {},
+    agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+}
+
+beforeAll(() => {
+  db.prepare(
+    `INSERT INTO users (principal_id, budget_cap_paise, delegation_mode) VALUES (?, ?, 'full')
+       ON CONFLICT(principal_id) DO UPDATE SET budget_cap_paise = excluded.budget_cap_paise,
+                                              delegation_mode = 'full'`
+  ).run(PRINCIPAL, CAP_PAISE);
+});
+
+beforeEach(async () => {
+  authenticator = new SoftAuthenticator();
+  authenticator.register(db, PRINCIPAL);
+  db.prepare("UPDATE users SET delegation_mode = 'full', budget_cap_paise = ? WHERE principal_id = ?")
+    .run(CAP_PAISE, PRINCIPAL);
+  db.prepare('DELETE FROM delegation_grants WHERE principal_id = ?').run(PRINCIPAL);
   checkoutRouter._sessions.clear();
+  resetLedger(); // the rolling window is process-wide
+  grantId = await issueGrant();
 });
 
-// ─── Helpers ────────────────────────────────────────────────────────────
-
-function stubIntentMandate(overrides = {}) {
-  return {
-    mandate_id: 'mnd_intent_test_001',
-    type: 'IntentMandate',
-    spec: 'ACP-2.0',
-    prev_mandate_id: null,
-    session_id: null,
-    issuer: 'buyer-agent:test',
-    subject: 'merchant',
-    issued_at: new Date().toISOString(),
-    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-    nonce: 'test_nonce_001',
-    claims: { budget_paise: 500000, intent: 'buy_earbuds' },
-    proof: { type: 'Ed25519Signature2020', alg: 'EdDSA', verification_method: 'did:key:buyer#1', jws: 'stub' },
-    ...overrides,
-  };
-}
-
-function stubPaymentMandate(overrides = {}) {
-  return {
-    mandate_id: 'mnd_payment_test_001',
-    type: 'PaymentMandate',
-    spec: 'ACP-2.0',
-    prev_mandate_id: null,
-    session_id: null,
-    issuer: 'buyer-agent:test',
-    subject: 'merchant',
-    issued_at: new Date().toISOString(),
-    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-    nonce: 'test_nonce_002',
-    claims: { authorized_amount: 179900, currency: 'INR' },
-    proof: { type: 'Ed25519Signature2020', alg: 'EdDSA', verification_method: 'did:key:buyer#1', jws: 'stub' },
-    ...overrides,
-  };
-}
-
-async function createSession() {
-  const res = await request(app)
-    .post('/api/v1/checkout/sessions')
-    .send({
-      intent_mandate: stubIntentMandate(),
-      requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }],
-    });
-  return res;
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// FEED ROUTE
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('GET /feed', () => {
-  test('short alias and /api/v1/feed both return the ACP product feed', async () => {
-    const short = await request(app).get('/feed');
-    const namespaced = await request(app).get('/api/v1/feed');
-    expect(short.statusCode).toBe(200);
-    expect(namespaced.statusCode).toBe(200);
-    expect(short.body.protocol).toBe('ACP');
-    expect(short.body.products.length).toBe(namespaced.body.products.length);
-  });
-});
-
-describe('GET /api/v1/feed', () => {
-  test('returns 200 with ACP product feed', async () => {
-    const res = await request(app).get('/api/v1/feed');
-    expect(res.statusCode).toBe(200);
-    expect(res.body.version).toBe('2.0');
-    expect(res.body.protocol).toBe('ACP');
-    expect(res.body.feed_type).toBe('product_catalog');
-    expect(res.body.currency).toBe('INR');
-    expect(res.body.products.length).toBe(3);
-    expect(res.body.count).toBe(3);
-    expect(res.body.generated_at).toBeDefined();
-  });
-
-  test('feed products have ACP-compliant integer paise prices', async () => {
-    const res = await request(app).get('/api/v1/feed');
-    res.body.products.forEach((p) => {
-      expect(Number.isInteger(p.price)).toBe(true);
-      expect(p.currency).toBe('INR');
-    });
-  });
+afterAll(() => {
+  db.prepare('DELETE FROM delegation_grants WHERE principal_id = ?').run(PRINCIPAL);
+  resetLedger();
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -108,72 +148,97 @@ describe('GET /api/v1/feed', () => {
 describe('POST /api/v1/checkout/sessions', () => {
   test('201 — creates session with correct schema', async () => {
     const res = await createSession();
-    expect(res.statusCode).toBe(201);
+    expect(res.status).toBe(201);
     expect(res.body.session_id).toMatch(/^acp_sess_/);
     expect(res.body.state).toBe('CREATED');
-    expect(res.body.amount_total).toBe(179900); // Boult earbuds ₹1,799
+    expect(res.body.amount_total).toBe(179900);
     expect(res.body.currency).toBe('INR');
     expect(res.body.expires_at).toBeDefined();
 
-    // Cart mandate shape
+    // Shape-C CartMandate, minted by the merchant (the only party with prices).
     const cm = res.body.cart_mandate;
-    expect(cm.mandate_id).toMatch(/^mnd_/);
+    expect(cm.mandate_id).toMatch(/^man_cart/);
     expect(cm.type).toBe('CartMandate');
-    expect(cm.spec).toBe('ACP-2.0');
-    expect(cm.prev_mandate_id).toBe('mnd_intent_test_001');
+    expect(cm.spec).toBe('ap2/0.1');
     expect(cm.session_id).toBe(res.body.session_id);
-    expect(cm.proof.type).toBe('Ed25519Signature2020');
+    expect(cm.proof.type).toBe('eddsa-jcs-2022');
+    // The cart chains to the grant the human signed, not to anything the agent
+    // supplied.
+    expect(cm.prev_mandate_id).toBe(grantId);
+    expect(cm.claims.intent_mandate_id).toBe(grantId);
   });
 
-  test('400 — missing intent_mandate', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions')
-      .send({ requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }] });
-    expect(res.statusCode).toBe(400);
+  test('400 — missing intent_mandate_id', async () => {
+    const res = await post('/api/v1/checkout/sessions', {
+      requested_items: [{ sku: EARBUDS, quantity: 1 }],
+    });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('MANDATE_MISSING');
   });
 
+  test('400 — a caller-supplied intent_mandate is refused outright', async () => {
+    // The old shape of this suite: an agent minting its own authority. Refused
+    // loudly rather than ignored, so a stale caller learns why.
+    const selfSigned = {
+      mandate_id: 'mnd_intent_self_signed',
+      type: 'IntentMandate',
+      claims: { constraints: { max_amount: 99999999 } },
+      proof: { type: 'Ed25519Signature2020', jws: 'stub' },
+    };
+    const items = [{ sku: EARBUDS, quantity: 1 }];
+
+    const bare = await post('/api/v1/checkout/sessions', {
+      intent_mandate: selfSigned,
+      requested_items: items,
+    });
+    expect(bare.status).toBe(400);
+    expect(bare.body.error.code).toBe('INTENT_MANDATE_NOT_ACCEPTED');
+
+    // And it cannot ride along with a legitimate reference, where a lenient
+    // handler might have read the grant for authorization and the mandate for
+    // its limits.
+    const smuggled = await post('/api/v1/checkout/sessions', {
+      intent_mandate_id: grantId,
+      intent_mandate: selfSigned,
+      requested_items: items,
+    });
+    expect(smuggled.status).toBe(400);
+    expect(smuggled.body.error.code).toBe('INTENT_MANDATE_NOT_ACCEPTED');
+  });
+
+  test('404 — intent_mandate_id that names no live grant', async () => {
+    const res = await post('/api/v1/checkout/sessions', {
+      intent_mandate_id: 'mnd_intent_does_not_exist',
+      requested_items: [{ sku: EARBUDS, quantity: 1 }],
+    });
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('GRANT_NOT_FOUND');
+  });
+
   test('400 — empty requested_items', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions')
-      .send({ intent_mandate: stubIntentMandate(), requested_items: [] });
-    expect(res.statusCode).toBe(400);
+    const res = await createSession([]);
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_ITEMS');
   });
 
   test('400 — product not found', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions')
-      .send({
-        intent_mandate: stubIntentMandate(),
-        requested_items: [{ sku: 'prod_nonexistent', quantity: 1 }],
-      });
-    expect(res.statusCode).toBe(400);
+    const res = await createSession([{ sku: 'prod_nonexistent', quantity: 1 }]);
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('PRODUCT_NOT_FOUND');
   });
 
   test('400 — out of stock product', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions')
-      .send({
-        intent_mandate: stubIntentMandate(),
-        requested_items: [{ sku: 'prod_electronics_003', quantity: 1 }],
-      });
-    expect(res.statusCode).toBe(400);
+    const res = await createSession([{ sku: OUT_OF_STOCK, quantity: 1 }]);
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('PRODUCT_UNAVAILABLE');
   });
 
   test('multi-item session calculates total correctly', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions')
-      .send({
-        intent_mandate: stubIntentMandate(),
-        requested_items: [
-          { sku: 'prod_electronics_001', quantity: 2 }, // 179900 * 2
-          { sku: 'prod_electronics_002', quantity: 1 }, // 199900
-        ],
-      });
-    expect(res.statusCode).toBe(201);
+    const res = await createSession([
+      { sku: EARBUDS, quantity: 2 },
+      { sku: POWER_BANK, quantity: 1 },
+    ]);
+    expect(res.status).toBe(201);
     expect(res.body.amount_total).toBe(179900 * 2 + 199900);
   });
 });
@@ -188,32 +253,35 @@ describe('PATCH /api/v1/checkout/sessions/:id', () => {
     const sessionId = created.body.session_id;
     const oldMandateId = created.body.cart_mandate.mandate_id;
 
-    const res = await request(app)
-      .patch(`/api/v1/checkout/sessions/${sessionId}`)
-      .send({ requested_items: [{ sku: 'prod_electronics_002', quantity: 1 }] });
+    const res = await patch(`/api/v1/checkout/sessions/${sessionId}`, {
+      requested_items: [{ sku: POWER_BANK, quantity: 1 }],
+    });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CREATED');
-    expect(res.body.amount_total).toBe(199900); // Mi Power Bank
-    expect(res.body.cart_mandate.mandate_id).not.toBe(oldMandateId); // New mandate
-    expect(res.body.cart_mandate.prev_mandate_id).toBe(oldMandateId); // Chains to old
+    expect(res.body.amount_total).toBe(199900);
+    expect(res.body.cart_mandate.mandate_id).not.toBe(oldMandateId);
+    // A replacement cart chains to the grant, not to the cart it supersedes: the
+    // AP2 chain records what authorized this cart, and the discarded cart
+    // authorized nothing.
+    expect(res.body.cart_mandate.prev_mandate_id).toBe(grantId);
   });
 
   test('404 — session not found', async () => {
-    const res = await request(app)
-      .patch('/api/v1/checkout/sessions/acp_sess_nonexistent')
-      .send({ requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }] });
-    expect(res.statusCode).toBe(404);
+    const res = await patch('/api/v1/checkout/sessions/acp_sess_nonexistent', {
+      requested_items: [{ sku: EARBUDS, quantity: 1 }],
+    });
+    expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 
   test('400 — empty requested_items on update', async () => {
     const created = await createSession();
-    const res = await request(app)
-      .patch(`/api/v1/checkout/sessions/${created.body.session_id}`)
-      .send({ requested_items: [] });
-    expect(res.statusCode).toBe(400);
+    const res = await patch(`/api/v1/checkout/sessions/${created.body.session_id}`, {
+      requested_items: [],
+    });
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('INVALID_ITEMS');
   });
 });
@@ -227,40 +295,35 @@ describe('GET /api/v1/checkout/sessions/:id', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    const res = await request(app).get(`/api/v1/checkout/sessions/${sessionId}`);
-    expect(res.statusCode).toBe(200);
+    const res = await get(`/api/v1/checkout/sessions/${sessionId}`);
+    expect(res.status).toBe(200);
 
-    // Top-level
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CREATED');
     expect(res.body.order_id).toMatch(/^ord_/);
     expect(res.body.amount).toBe(179900);
     expect(res.body.currency).toBe('INR');
 
-    // Line items
     expect(res.body.line_items).toHaveLength(1);
-    expect(res.body.line_items[0].sku).toBe('prod_electronics_001');
+    expect(res.body.line_items[0].sku).toBe(EARBUDS);
     expect(res.body.line_items[0].unit_price).toBe(179900);
 
-    // Mandate chain
-    expect(res.body.mandate_chain.intent_mandate_id).toBe('mnd_intent_test_001');
-    expect(res.body.mandate_chain.cart_mandate_id).toMatch(/^mnd_/);
+    expect(res.body.mandate_chain.intent_mandate_id).toBe(grantId);
+    expect(res.body.mandate_chain.cart_mandate_id).toMatch(/^man_cart/);
     expect(res.body.mandate_chain.payment_mandate_id).toBeNull();
 
-    // Razorpay
     expect(res.body.razorpay.order_id).toBeNull();
     expect(res.body.razorpay.payment_id).toBeNull();
     expect(res.body.razorpay.payment_link_id).toBeNull();
 
-    // Timestamps
     expect(res.body.created_at).toBeDefined();
     expect(res.body.updated_at).toBeDefined();
     expect(res.body.failure).toBeNull();
   });
 
   test('404 — session not found', async () => {
-    const res = await request(app).get('/api/v1/checkout/sessions/acp_sess_nonexistent');
-    expect(res.statusCode).toBe(404);
+    const res = await get('/api/v1/checkout/sessions/acp_sess_nonexistent');
+    expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 });
@@ -272,10 +335,8 @@ describe('GET /api/v1/checkout/sessions/:id', () => {
 describe('POST /api/v1/checkout/sessions/:id/complete', () => {
   test('400 — missing Idempotency-Key', async () => {
     const created = await createSession();
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${created.body.session_id}/complete`)
-      .send({ payment_mandate: stubPaymentMandate() });
-    expect(res.statusCode).toBe(400);
+    const res = await post(`/api/v1/checkout/sessions/${created.body.session_id}/complete`);
+    expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('IDEMPOTENCY_KEY_MISSING');
   });
 
@@ -283,112 +344,79 @@ describe('POST /api/v1/checkout/sessions/:id/complete', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_test_001')
-      .send({ payment_mandate: stubPaymentMandate() });
+    const res = await completeSession(sessionId);
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CONFIRMED');
     expect(res.body.order.order_id).toMatch(/^ord_/);
     expect(res.body.order.razorpay_order_id).toMatch(/^order_simulated_/);
-    expect(res.body.payment_mandate_id).toBe('mnd_payment_test_001');
+    // The PaymentMandate is minted and signed by the merchant, not supplied by
+    // the caller — nothing in the request body can name it.
+    expect(res.body.payment_mandate_id).toMatch(/^man_pay/);
     expect(res.body.next).toBe('await_webhook');
   });
 
   test('202 — escalated (over threshold)', async () => {
-    // Create a session with a large amount (2 items * earbuds = ₹3,598)
-    // Set the threshold very low
     const origThreshold = process.env.AUTO_APPROVE_THRESHOLD_PAISE;
-    process.env.AUTO_APPROVE_THRESHOLD_PAISE = '100'; // 1 rupee
+    process.env.AUTO_APPROVE_THRESHOLD_PAISE = '100'; // ₹1
+    try {
+      const created = await createSession();
+      const sessionId = created.body.session_id;
 
-    const created = await createSession();
-    const sessionId = created.body.session_id;
+      const res = await completeSession(sessionId);
 
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_test_002')
-      .send({ payment_mandate: stubPaymentMandate() });
-
-    expect(res.statusCode).toBe(202);
-    expect(res.body.session_id).toBe(sessionId);
-    expect(res.body.state).toBe('CONFIRMED');
-    expect(res.body.approval.type).toBe('payment_link');
-    expect(res.body.approval.url).toMatch(/^https:\/\/rzp\.io\/i\//);
-    expect(res.body.approval.payment_link_id).toMatch(/^plink_simulated_/);
-    expect(res.body.next).toBe('await_human_then_webhook');
-
-    // Restore
-    if (origThreshold !== undefined) {
-      process.env.AUTO_APPROVE_THRESHOLD_PAISE = origThreshold;
-    } else {
-      delete process.env.AUTO_APPROVE_THRESHOLD_PAISE;
+      expect(res.status).toBe(202);
+      expect(res.body.session_id).toBe(sessionId);
+      expect(res.body.state).toBe('CONFIRMED');
+      expect(res.body.approval.type).toBe('payment_link');
+      expect(res.body.approval.url).toMatch(/^https:\/\/rzp\.io\/i\//);
+      expect(res.body.approval.payment_link_id).toMatch(/^plink_simulated_/);
+      expect(res.body.next).toBe('await_human_then_webhook');
+    } finally {
+      if (origThreshold !== undefined) {
+        process.env.AUTO_APPROVE_THRESHOLD_PAISE = origThreshold;
+      } else {
+        delete process.env.AUTO_APPROVE_THRESHOLD_PAISE;
+      }
     }
   });
 
-  test('400 — missing payment_mandate', async () => {
-    const created = await createSession();
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${created.body.session_id}/complete`)
-      .set('Idempotency-Key', 'idem_test_003')
-      .send({});
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error.code).toBe('MANDATE_MISSING');
-  });
-
-  test('409 — cannot complete twice', async () => {
+  test('409 — cannot complete twice with a different key', async () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    // First complete
-    await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_test_004a')
-      .send({ payment_mandate: stubPaymentMandate() });
+    expect((await completeSession(sessionId)).status).toBe(200);
 
-    // Second complete
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_test_004b')
-      .send({ payment_mandate: stubPaymentMandate() });
-
-    expect(res.statusCode).toBe(409);
+    const res = await completeSession(sessionId);
+    expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATE_TRANSITION');
   });
 
   test('idempotent replay — same Idempotency-Key replays the original response, not a 409', async () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
+    const key = idempotencyKey();
 
-    const first = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_replay_001')
-      .send({ payment_mandate: stubPaymentMandate() });
-
+    const first = await completeSession(sessionId, key);
     // Same key, replayed as if the original 200 was lost in transit.
-    const retry = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_replay_001')
-      .send({ payment_mandate: stubPaymentMandate() });
+    const retry = await completeSession(sessionId, key);
 
-    expect(first.statusCode).toBe(200);
-    expect(retry.statusCode).toBe(200); // must NOT 409 — this is the retry-safety guarantee
-    expect(retry.body).toEqual(first.body); // byte-for-byte replay of the original completion
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200); // must NOT 409 — this is the retry-safety guarantee
+    expect(retry.body).toEqual(first.body); // verbatim replay of the original completion
   });
 
   test('session state is CONFIRMED after complete', async () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_test_005')
-      .send({ payment_mandate: stubPaymentMandate() });
+    const done = await completeSession(sessionId);
+    expect(done.status).toBe(200);
 
-    const state = await request(app).get(`/api/v1/checkout/sessions/${sessionId}`);
+    const state = await get(`/api/v1/checkout/sessions/${sessionId}`);
     expect(state.body.state).toBe('CONFIRMED');
-    expect(state.body.mandate_chain.payment_mandate_id).toBe('mnd_payment_test_001');
+    expect(state.body.mandate_chain.payment_mandate_id).toBe(done.body.payment_mandate_id);
     expect(state.body.razorpay.order_id).toMatch(/^order_simulated_/);
   });
 });
@@ -402,11 +430,9 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/cancel`)
-      .send();
+    const res = await cancelSession(sessionId);
 
-    expect(res.statusCode).toBe(200);
+    expect(res.status).toBe(200);
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CANCELLED');
     expect(res.body.razorpay.order_id).toBeNull();
@@ -417,41 +443,29 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    // Complete it first
-    await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_cancel_001')
-      .send({ payment_mandate: stubPaymentMandate() });
+    expect((await completeSession(sessionId)).status).toBe(200);
 
-    // Cancel it
-    const res = await request(app)
-      .post(`/api/v1/checkout/sessions/${sessionId}/cancel`)
-      .send();
-
-    expect(res.statusCode).toBe(200);
+    const res = await cancelSession(sessionId);
+    expect(res.status).toBe(200);
     expect(res.body.state).toBe('CANCELLED');
     expect(res.body.razorpay.order_id).toMatch(/^order_simulated_/);
     expect(res.body.razorpay.status).toBe('cancelled');
   });
 
-  test('409 — cannot cancel already cancelled session', async () => {
+  test('409 — cannot cancel an already cancelled session', async () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    // Cancel once
-    await request(app).post(`/api/v1/checkout/sessions/${sessionId}/cancel`).send();
+    expect((await cancelSession(sessionId)).status).toBe(200);
 
-    // Cancel again
-    const res = await request(app).post(`/api/v1/checkout/sessions/${sessionId}/cancel`).send();
-    expect(res.statusCode).toBe(409);
+    const res = await cancelSession(sessionId);
+    expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ALREADY_CANCELLED');
   });
 
   test('404 — session not found', async () => {
-    const res = await request(app)
-      .post('/api/v1/checkout/sessions/acp_sess_nonexistent/cancel')
-      .send();
-    expect(res.statusCode).toBe(404);
+    const res = await cancelSession('acp_sess_nonexistent');
+    expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 
@@ -459,9 +473,9 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    await request(app).post(`/api/v1/checkout/sessions/${sessionId}/cancel`).send();
+    expect((await cancelSession(sessionId)).status).toBe(200);
 
-    const state = await request(app).get(`/api/v1/checkout/sessions/${sessionId}`);
+    const state = await get(`/api/v1/checkout/sessions/${sessionId}`);
     expect(state.body.state).toBe('CANCELLED');
   });
 
@@ -469,12 +483,12 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
     const created = await createSession();
     const sessionId = created.body.session_id;
 
-    await request(app).post(`/api/v1/checkout/sessions/${sessionId}/cancel`).send();
+    expect((await cancelSession(sessionId)).status).toBe(200);
 
-    const res = await request(app)
-      .patch(`/api/v1/checkout/sessions/${sessionId}`)
-      .send({ requested_items: [{ sku: 'prod_electronics_002', quantity: 1 }] });
-    expect(res.statusCode).toBe(409);
+    const res = await patch(`/api/v1/checkout/sessions/${sessionId}`, {
+      requested_items: [{ sku: POWER_BANK, quantity: 1 }],
+    });
+    expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATE_TRANSITION');
   });
 });
@@ -485,13 +499,11 @@ describe('POST /api/v1/checkout/sessions/:id/cancel', () => {
 
 describe('short /session aliases', () => {
   test('POST /session creates a session with the schema shape', async () => {
-    const res = await request(app)
-      .post('/session')
-      .send({
-        intent_mandate: stubIntentMandate(),
-        requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }],
-      });
-    expect(res.statusCode).toBe(201);
+    const res = await post('/session', {
+      intent_mandate_id: grantId,
+      requested_items: [{ sku: EARBUDS, quantity: 1 }],
+    });
+    expect(res.status).toBe(201);
     expect(res.body.session_id).toMatch(/^acp_sess_/);
     expect(res.body.state).toBe('CREATED');
     expect(res.body.cart_mandate.type).toBe('CartMandate');
@@ -500,35 +512,32 @@ describe('short /session aliases', () => {
   });
 
   test('GET /session/:id, PATCH, complete, and cancel share the in-memory store', async () => {
-    const created = await request(app)
-      .post('/session')
-      .send({
-        intent_mandate: stubIntentMandate(),
-        requested_items: [{ sku: 'prod_electronics_001', quantity: 1 }],
-      });
+    const created = await post('/session', {
+      intent_mandate_id: grantId,
+      requested_items: [{ sku: EARBUDS, quantity: 1 }],
+    });
     const sessionId = created.body.session_id;
 
-    const patched = await request(app)
-      .patch(`/session/${sessionId}`)
-      .send({ requested_items: [{ sku: 'prod_electronics_002', quantity: 1 }] });
-    expect(patched.statusCode).toBe(200);
+    const patched = await patch(`/session/${sessionId}`, {
+      requested_items: [{ sku: POWER_BANK, quantity: 1 }],
+    });
+    expect(patched.status).toBe(200);
     expect(patched.body.amount_total).toBe(199900);
 
-    const got = await request(app).get(`/session/${sessionId}`);
-    expect(got.statusCode).toBe(200);
+    const got = await get(`/session/${sessionId}`);
+    expect(got.status).toBe(200);
     expect(got.body.amount).toBe(199900);
     expect(got.body.mandate_chain.cart_mandate_id).toBe(patched.body.cart_mandate.mandate_id);
 
-    const completed = await request(app)
-      .post(`/session/${sessionId}/complete`)
-      .set('Idempotency-Key', 'idem_alias_001')
-      .send({ payment_mandate: stubPaymentMandate() });
-    expect(completed.statusCode).toBe(200);
+    const completed = await post(`/session/${sessionId}/complete`, {},
+      agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+    expect(completed.status).toBe(200);
     expect(completed.body.next).toBe('await_webhook');
     expect(completed.body.order.razorpay_order_id).toMatch(/^order_simulated_/);
 
-    const cancelled = await request(app).post(`/session/${sessionId}/cancel`).send();
-    expect(cancelled.statusCode).toBe(200);
+    const cancelled = await post(`/session/${sessionId}/cancel`, {},
+      agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+    expect(cancelled.status).toBe(200);
     expect(cancelled.body.state).toBe('CANCELLED');
   });
 });

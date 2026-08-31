@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "acp-merchant-tools": {
+      "command": "node",
+      "args": ["/Users/tanmaykumar/Desktop/RazorPay/src/mcp/server.js"]
+    }
+  }
+}

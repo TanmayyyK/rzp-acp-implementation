@@ -11,6 +11,10 @@
 const express = require('express');
 const razorpayClient = require('../lib/razorpayClient');
 const config = require('../config');
+// Server-wide audit chain (ADR-005). The ACP checkout flow audits its Razorpay
+// order/link creation inside checkout.js; this direct REST surface must do the
+// same so no Razorpay test order is ever created without a MONEY_ACTION block.
+const { sharedAuditLog, EventType, Actor } = require('../lib/auditLog');
 
 const router = express.Router();
 
@@ -51,7 +55,19 @@ router.post('/', async (req, res) => {
       notes: notes || {},
     });
 
-    console.log(`[Orders] Razorpay Order created: ${order.id} (receipt: ${receipt})`);
+    sharedAuditLog.append({
+      session_id: receipt || null,
+      actor: Actor.MERCHANT_SERVER,
+      event_type: EventType.MONEY_ACTION,
+      payload: {
+        action: 'razorpay_order_created',
+        razorpay_order_id: order.id,
+        amount_paise: order.amount,
+        currency: order.currency,
+        receipt: order.receipt,
+        status: order.status,
+      },
+    });
 
     res.status(201).json({
       order_id: order.id,
@@ -110,7 +126,19 @@ router.post('/link', async (req, res) => {
       notes: notes || {},
     });
 
-    console.log(`[Orders] Payment Link created: ${link.id} (amount: ${amount})`);
+    sharedAuditLog.append({
+      session_id: receipt || null,
+      actor: Actor.MERCHANT_SERVER,
+      event_type: EventType.MONEY_ACTION,
+      payload: {
+        action: 'razorpay_payment_link_created',
+        payment_link_id: link.id,
+        short_url: link.short_url,
+        amount_paise: link.amount,
+        currency: link.currency,
+        status: link.status,
+      },
+    });
 
     res.status(201).json({
       payment_link_id: link.id,

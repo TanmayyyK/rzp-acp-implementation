@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>/ — graphify tree viewer</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      margin: 20px 0 0 24px;
+      font-size: 2.2rem;
+      font-weight: bold;
+      color: #1e3a56;
+    }
+    .controls {
+      margin: 20px 0 15px 24px;
+    }
+    button {
+      margin-right: 10px;
+      padding: 8px 18px;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s ease-in-out;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:active {
+      background: #004085;
+    }
+    #tree-container {
+      width: calc(100vw - 48px); /* Adjust for body margin/padding */
+      height: 85vh;
+      overflow: auto;
+      border-radius: 8px;
+      background: #fff;
+      margin-left: 24px;
+      margin-right: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border: 1px solid #ddd;
+    }
+    svg {
+      background: #fff;
+      border-radius: 8px;
+      display: block; /* Important for D3 */
+    }
+    .node circle {
+      stroke-width: 2.5px;
+    }
+    .node text { /* Base style for the <text> container */
+      font: 13px 'Segoe UI', sans-serif;
+      paint-order: stroke fill; /* Ensures text is readable over lines */
+      stroke: #fff; /* White halo */
+      stroke-width: 3px; /* Halo thickness */
+      stroke-linejoin: round;
+      stroke-opacity: 0.85; /* Halo opacity */
+    }
+    .link {
+      fill: none;
+      stroke-opacity: 0.7;
+      stroke-width: 2px;
+    }
+  </style>
+</head>
+<body>
+  <h1>/ — Knowledge Graph</h1>
+  <div class="controls">
+    <button onclick="expandAll()">Expand All</button>
+    <button onclick="collapseAll()">Collapse All</button>
+    <button onclick="resetView()">Reset View</button>
+  </div>
+  <div id="tree-container">
+    <svg id="tree-svg" width="6000" height="8000"></svg>
+  </div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    const initialJsonData = {"name":"/","total_count":689,"children":[{"name":"docs","total_count":42,"children":[{"name":"ACP_ENDPOINT_SCHEMAS.md","total_count":9,"children":[{"name":"1. Create Checkout Session","total_count":1,"children":[]},{"name":"2. Update Checkout Session","total_count":1,"children":[]},{"name":"3. Get Session State","total_count":1,"children":[]},{"name":"4. Complete Checkout","total_count":1,"children":[]},{"name":"5. Cancel Checkout","total_count":1,"children":[]},{"name":"ACP Endpoint Schemas (Day 3)","total_count":1,"children":[]},{"name":"ACP_ENDPOINT_SCHEMAS.md","total_count":1,"children":[]},{"name":"Common Types & Models","total_count":1,"children":[]},{"name":"Global Error Schema","total_count":1,"children":[]}]},{"name":"API_MAPPING_CHEAT_SHEET.md","total_count":6,"children":[{"name":"1. ACP-5 Endpoint Mapping to Razorpay","total_count":1,"children":[]},{"name":"2. AP2-3 Mandate Authorization Chain","total_count":1,"children":[]},{"name":"3. Webhook Handling Taxonomy","total_count":1,"children":[]},{"name":"4. Cryptographic Validation Requirements","total_count":1,"children":[]},{"name":"API Mapping & Cheat Sheet","total_count":1,"children":[]},{"name":"API_MAPPING_CHEAT_SHEET.md","total_count":1,"children":[]}]},{"name":"ARCHITECTURE.md","total_count":16,"children":[{"name":"1. Component diagram","total_count":1,"children":[]},{"name":"2. Data models (exact JSON)","total_count":1,"children":[]},{"name":"2.1 Mandate envelope (shared by all three AP2 mandates)","total_count":1,"children":[]},{"name":"2.2 IntentMandate \u2014 signed by the **buyer** (the user's WebAuthn-backed key, via the agent)","total_count":1,"children":[]},{"name":"2.3 CartMandate \u2014 signed by the **merchant**","total_count":1,"children":[]},{"name":"2.4 PaymentMandate \u2014 signed by the **merchant server acting as processor-of-record**","total_count":1,"children":[]},{"name":"2.5 Order object (our internal record; 1:1 with a Razorpay order and a mandate chain)","total_count":1,"children":[]},{"name":"2.6 Audit log entry (hash-chained, append-only)","total_count":1,"children":[]},{"name":"3. API contracts (merchant server \u21c4 buyer agent)","total_count":1,"children":[]},{"name":"3.1 Authentication (every agent \u2192 merchant request)","total_count":1,"children":[]},{"name":"3.2 Discovery & catalog","total_count":1,"children":[]},{"name":"3.3 Checkout session lifecycle \u2014 the 5 ACP endpoints","total_count":1,"children":[]},{"name":"3.4 Webhooks (Razorpay \u2192 merchant)","total_count":1,"children":[]},{"name":"3.5 MCP tool surface (what the buyer agent actually calls)","total_count":1,"children":[]},{"name":"Architecture \u2014 Agent Commerce Layer for Razorpay","total_count":1,"children":[]},{"name":"ARCHITECTURE.md","total_count":1,"children":[]}]},{"name":"DECISIONS.md","total_count":11,"children":[{"name":"ADR-001 \u2014 Merchant server and buyer agent are two independent services, joined by MCP","total_count":1,"children":[]},{"name":"ADR-002 \u2014 The AP2 three-mandate chain is the authorization backbone; each party signs its own link","total_count":1,"children":[]},{"name":"ADR-003 \u2014 Razorpay Orders is the money primitive; Payment Links is the human-in-the-loop rail","total_count":1,"children":[]},{"name":"ADR-004 \u2014 Money is an integer in minor units (paise); never a float","total_count":1,"children":[]},{"name":"ADR-005 \u2014 The audit trail is a hash-chained append-only log","total_count":1,"children":[]},{"name":"ADR-006 \u2014 Guardrails are pure, server-side functions enforced at every mandate boundary (defense in depth)","total_count":1,"children":[]},{"name":"ADR-007 \u2014 Idempotency on every state-mutating call; async state only from verified webhooks","total_count":1,"children":[]},{"name":"ADR-008 \u2014 Agent identity via attestation header bound to a WebAuthn principal","total_count":1,"children":[]},{"name":"ADR-009 \u2014 The checkout state machine is the ACP 5-stage lifecycle, advanced only by legal transitions","total_count":1,"children":[]},{"name":"Architecture Decision Records","total_count":1,"children":[]},{"name":"DECISIONS.md","total_count":1,"children":[]}]}]},{"name":"files-5","total_count":16,"children":[{"name":"razorpayIdempotencyWrapper.js","total_count":15,"children":[{"name":".constructor()","total_count":1,"children":[]},{"name":".constructor()","total_count":1,"children":[]},{"name":"clear()","total_count":1,"children":[]},{"name":"createIdempotencyWrapper()","total_count":1,"children":[]},{"name":"execute()","total_count":1,"children":[]},{"name":"generateIdempotencyKey()","total_count":1,"children":[]},{"name":"getStatus()","total_count":1,"children":[]},{"name":"IdempotencyKeyError","total_count":1,"children":[]},{"name":"isNetworkError()","total_count":1,"children":[]},{"name":"isValidIdempotencyKey()","total_count":1,"children":[]},{"name":"NETWORK_ERROR_CODES","total_count":1,"children":[]},{"name":"RazorpayRequestError","total_count":1,"children":[]},{"name":"readEntry()","total_count":1,"children":[]},{"name":"size()","total_count":1,"children":[]},{"name":"{ randomUUID }","total_count":1,"children":[]}]},{"name":"razorpayIdempotencyWrapper.test.js","total_count":1,"children":[{"name":"{\n  createIdempotencyWrapper,\n  generateIdempotencyKey,\n  isValidIdempotencyKey,\n  isNetworkError,\n  IdempotencyKeyError,\n  RazorpayRequestError,\n}","total_count":1,"children":[]}]}]},{"name":"files-6","total_count":25,"children":[{"name":"ap2-mandate-validator.demo.js","total_count":13,"children":[{"name":"expiredIntent","total_count":1,"children":[]},{"name":"intent","total_count":1,"children":[]},{"name":"log()","total_count":1,"children":[]},{"name":"overBudgetPayment","total_count":1,"children":[]},{"name":"payment","total_count":1,"children":[]},{"name":"r1","total_count":1,"children":[]},{"name":"r2","total_count":1,"children":[]},{"name":"r3","total_count":1,"children":[]},{"name":"r4","total_count":1,"children":[]},{"name":"t1","total_count":1,"children":[]},{"name":"t2","total_count":1,"children":[]},{"name":"tracker","total_count":1,"children":[]},{"name":"{\n  validatePaymentAgainstIntent,\n  createNonceTracker,\n  requiresHumanApproval,\n  ErrorCode,\n}","total_count":1,"children":[]}]},{"name":"ap2-mandate-validator.js","total_count":12,"children":[{"name":"checkAmount()","total_count":1,"children":[]},{"name":"checkExpiry()","total_count":1,"children":[]},{"name":"checkNonce()","total_count":1,"children":[]},{"name":"createHumanApprovalCheck()","total_count":1,"children":[]},{"name":"createNonceTracker()","total_count":1,"children":[]},{"name":"ErrorCode","total_count":1,"children":[]},{"name":"isNonceReplayed()","total_count":1,"children":[]},{"name":"isValidPaise()","total_count":1,"children":[]},{"name":"recordNonce()","total_count":1,"children":[]},{"name":"requiresHumanApproval()","total_count":1,"children":[]},{"name":"toEpochMillis()","total_count":1,"children":[]},{"name":"validatePaymentAgainstIntent()","total_count":1,"children":[]}]}]},{"name":"files-7","total_count":22,"children":[{"name":"audit-log.demo.js","total_count":11,"children":[{"name":"block0","total_count":1,"children":[]},{"name":"block1","total_count":1,"children":[]},{"name":"block2","total_count":1,"children":[]},{"name":"chain","total_count":1,"children":[]},{"name":"forgedGenesisChain","total_count":1,"children":[]},{"name":"reorderedChain","total_count":1,"children":[]},{"name":"revalidated","total_count":1,"children":[]},{"name":"roundTripped","total_count":1,"children":[]},{"name":"section()","total_count":1,"children":[]},{"name":"tamperedChain","total_count":1,"children":[]},{"name":"{ appendEvent, verifyChain, GENESIS_HASH, createGenesisBlock, ChainIntegrityError }","total_count":1,"children":[]}]},{"name":"audit-log.js","total_count":11,"children":[{"name":".constructor()","total_count":1,"children":[]},{"name":"appendEvent()","total_count":1,"children":[]},{"name":"ChainIntegrityError","total_count":1,"children":[]},{"name":"createGenesisBlock()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"deepFreeze()","total_count":1,"children":[]},{"name":"GENESIS_HASH","total_count":1,"children":[]},{"name":"hashBlockContent()","total_count":1,"children":[]},{"name":"sha256Hex()","total_count":1,"children":[]},{"name":"stableStringify()","total_count":1,"children":[]},{"name":"verifyChain()","total_count":1,"children":[]}]}]},{"name":"files-8","total_count":29,"children":[{"name":"App.demo.jsx","total_count":1,"children":[{"name":"App()","total_count":1,"children":[]}]},{"name":"BuyerAgentChat.jsx","total_count":18,"children":[{"name":"AgentMessage()","total_count":1,"children":[]},{"name":"AgentTypingIndicator()","total_count":1,"children":[]},{"name":"buildStubReceipt()","total_count":1,"children":[]},{"name":"BuyerAgentChat()","total_count":1,"children":[]},{"name":"createId()","total_count":1,"children":[]},{"name":"DEFAULT_INITIAL_MESSAGES","total_count":1,"children":[]},{"name":"formatRupees()","total_count":1,"children":[]},{"name":"formatTime()","total_count":1,"children":[]},{"name":"IconBot()","total_count":1,"children":[]},{"name":"IconCheck()","total_count":1,"children":[]},{"name":"IconReceipt()","total_count":1,"children":[]},{"name":"IconSend()","total_count":1,"children":[]},{"name":"MessageBubble()","total_count":1,"children":[]},{"name":"ReceiptMessage()","total_count":1,"children":[]},{"name":"receiveAgentReply()","total_count":1,"children":[]},{"name":"STATUS_LABEL","total_count":1,"children":[]},{"name":"UserMessage()","total_count":1,"children":[]},{"name":"wait()","total_count":1,"children":[]}]},{"name":"TransactionInspector.jsx","total_count":10,"children":[{"name":"EVENT_TYPES","total_count":1,"children":[]},{"name":"formatDuration()","total_count":1,"children":[]},{"name":"formatPaise()","total_count":1,"children":[]},{"name":"JsonValue()","total_count":1,"children":[]},{"name":"MANDATE","total_count":1,"children":[]},{"name":"PaneHeader()","total_count":1,"children":[]},{"name":"pickWeighted()","total_count":1,"children":[]},{"name":"randId()","total_count":1,"children":[]},{"name":"TONE_STYLES","total_count":1,"children":[]},{"name":"TransactionInspector()","total_count":1,"children":[]}]}]},{"name":"jcs-hmac.js","total_count":14,"children":[{"name":"assertValidSecret()","total_count":1,"children":[]},{"name":"canonicalize()","total_count":1,"children":[]},{"name":"createSignedEnvelope()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"isPlainObject()","total_count":1,"children":[]},{"name":"RFC-8785","total_count":1,"children":[]},{"name":"serializeArray()","total_count":1,"children":[]},{"name":"serializeNumber()","total_count":1,"children":[]},{"name":"serializeObject()","total_count":1,"children":[]},{"name":"serializeString()","total_count":1,"children":[]},{"name":"serializeValue()","total_count":1,"children":[]},{"name":"sign()","total_count":1,"children":[]},{"name":"verify()","total_count":1,"children":[]},{"name":"verifySignedEnvelope()","total_count":1,"children":[]}]},{"name":"package.json","total_count":37,"children":[{"name":"@ai-sdk/google","total_count":1,"children":[]},{"name":"@ai-sdk/google","total_count":1,"children":[]},{"name":"@ai-sdk/groq","total_count":1,"children":[]},{"name":"@ai-sdk/groq","total_count":1,"children":[]},{"name":"@modelcontextprotocol/sdk","total_count":1,"children":[]},{"name":"@modelcontextprotocol/sdk","total_count":1,"children":[]},{"name":"ai","total_count":1,"children":[]},{"name":"ai","total_count":1,"children":[]},{"name":"better-sqlite3","total_count":1,"children":[]},{"name":"better-sqlite3","total_count":1,"children":[]},{"name":"dependencies","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"dev","total_count":1,"children":[]},{"name":"devDependencies","total_count":1,"children":[]},{"name":"dotenv","total_count":1,"children":[]},{"name":"dotenv","total_count":1,"children":[]},{"name":"engines","total_count":1,"children":[]},{"name":"eslint","total_count":1,"children":[]},{"name":"eslint","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"jest","total_count":1,"children":[]},{"name":"jest","total_count":1,"children":[]},{"name":"lint","total_count":1,"children":[]},{"name":"main","total_count":1,"children":[]},{"name":"mcp","total_count":1,"children":[]},{"name":"name","total_count":1,"children":[]},{"name":"node","total_count":1,"children":[]},{"name":"razorpay","total_count":1,"children":[]},{"name":"razorpay","total_count":1,"children":[]},{"name":"scripts","total_count":1,"children":[]},{"name":"start","total_count":1,"children":[]},{"name":"supertest","total_count":1,"children":[]},{"name":"supertest","total_count":1,"children":[]},{"name":"test","total_count":1,"children":[]},{"name":"test:e2e","total_count":1,"children":[]},{"name":"version","total_count":1,"children":[]}]},{"name":"public","total_count":55,"children":[{"name":"js","total_count":55,"children":[{"name":"chat.js","total_count":17,"children":[{"name":"addBubble()","total_count":1,"children":[]},{"name":"addReceipt()","total_count":1,"children":[]},{"name":"addThinkingLive()","total_count":1,"children":[]},{"name":"appendNarration()","total_count":1,"children":[]},{"name":"autogrow()","total_count":1,"children":[]},{"name":"dismissHero()","total_count":1,"children":[]},{"name":"el()","total_count":1,"children":[]},{"name":"finalizeThinking()","total_count":1,"children":[]},{"name":"formatTime()","total_count":1,"children":[]},{"name":"offlineNotice()","total_count":1,"children":[]},{"name":"renderMenu()","total_count":1,"children":[]},{"name":"renderThinkingSteps()","total_count":1,"children":[]},{"name":"setLock()","total_count":1,"children":[]},{"name":"streamThinking()","total_count":1,"children":[]},{"name":"submit()","total_count":1,"children":[]},{"name":"toBottom()","total_count":1,"children":[]},{"name":"trow()","total_count":1,"children":[]}]},{"name":"store.js","total_count":12,"children":[{"name":"amountPaiseOf()","total_count":1,"children":[]},{"name":"emit()","total_count":1,"children":[]},{"name":"feedView()","total_count":1,"children":[]},{"name":"formatPaise()","total_count":1,"children":[]},{"name":"formatRupees()","total_count":1,"children":[]},{"name":"icon()","total_count":1,"children":[]},{"name":"idOf()","total_count":1,"children":[]},{"name":"narrate()","total_count":1,"children":[]},{"name":"poll()","total_count":1,"children":[]},{"name":"snapshot()","total_count":1,"children":[]},{"name":"truncateHash()","total_count":1,"children":[]},{"name":"verify()","total_count":1,"children":[]}]},{"name":"theme.js","total_count":3,"children":[{"name":"apply()","total_count":1,"children":[]},{"name":"current()","total_count":1,"children":[]},{"name":"persist()","total_count":1,"children":[]}]},{"name":"trust.js","total_count":23,"children":[{"name":"close()","total_count":1,"children":[]},{"name":"el()","total_count":1,"children":[]},{"name":"ensureGroup()","total_count":1,"children":[]},{"name":"fmtDuration()","total_count":1,"children":[]},{"name":"fmtStamp()","total_count":1,"children":[]},{"name":"fmtTime()","total_count":1,"children":[]},{"name":"focusables()","total_count":1,"children":[]},{"name":"highlight()","total_count":1,"children":[]},{"name":"onKeydown()","total_count":1,"children":[]},{"name":"onVerify()","total_count":1,"children":[]},{"name":"open()","total_count":1,"children":[]},{"name":"p()","total_count":1,"children":[]},{"name":"p()","total_count":1,"children":[]},{"name":"recomputeMandate()","total_count":1,"children":[]},{"name":"renderChain()","total_count":1,"children":[]},{"name":"renderConn()","total_count":1,"children":[]},{"name":"renderIntegrity()","total_count":1,"children":[]},{"name":"renderJson()","total_count":1,"children":[]},{"name":"section()","total_count":1,"children":[]},{"name":"statusOf()","total_count":1,"children":[]},{"name":"syncActivity()","total_count":1,"children":[]},{"name":"tickExpiry()","total_count":1,"children":[]},{"name":"toneForIndex()","total_count":1,"children":[]}]}]}]},{"name":"README.md","total_count":6,"children":[{"name":"Agent Commerce Layer for Razorpay","total_count":1,"children":[]},{"name":"Development Setup","total_count":1,"children":[]},{"name":"Documentation","total_count":1,"children":[]},{"name":"Key Technologies","total_count":1,"children":[]},{"name":"Overview","total_count":1,"children":[]},{"name":"README.md","total_count":1,"children":[]}]},{"name":"schemas","total_count":210,"children":[{"name":"cart-mandate.schema.json","total_count":74,"children":[{"name":"$defs","total_count":1,"children":[]},{"name":"$id","total_count":1,"children":[]},{"name":"$ref","total_count":1,"children":[]},{"name":"$schema","total_count":1,"children":[]},{"name":"additionalProperties","total_count":1,"children":[]},{"name":"additionalProperties","total_count":1,"children":[]},{"name":"cart_id","total_count":1,"children":[]},{"name":"cart_id","total_count":1,"children":[]},{"name":"const","total_count":1,"children":[]},{"name":"const","total_count":1,"children":[]},{"name":"contentEncoding","total_count":1,"children":[]},{"name":"created_at","total_count":1,"children":[]},{"name":"created_at","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"intent_reference","total_count":1,"children":[]},{"name":"intent_reference","total_count":1,"children":[]},{"name":"items","total_count":1,"children":[]},{"name":"line_items","total_count":1,"children":[]},{"name":"line_items","total_count":1,"children":[]},{"name":"line_total_paise","total_count":1,"children":[]},{"name":"line_total_paise","total_count":1,"children":[]},{"name":"LineItem","total_count":1,"children":[]},{"name":"locked","total_count":1,"children":[]},{"name":"locked","total_count":1,"children":[]},{"name":"mandate_type","total_count":1,"children":[]},{"name":"mandate_type","total_count":1,"children":[]},{"name":"maximum","total_count":1,"children":[]},{"name":"maxLength","total_count":1,"children":[]},{"name":"maxLength","total_count":1,"children":[]},{"name":"minimum","total_count":1,"children":[]},{"name":"minimum","total_count":1,"children":[]},{"name":"minimum","total_count":1,"children":[]},{"name":"minimum","total_count":1,"children":[]},{"name":"minItems","total_count":1,"children":[]},{"name":"minLength","total_count":1,"children":[]},{"name":"minLength","total_count":1,"children":[]},{"name":"properties","total_count":1,"children":[]},{"name":"properties","total_count":1,"children":[]},{"name":"quantity","total_count":1,"children":[]},{"name":"quantity","total_count":1,"children":[]},{"name":"required","total_count":1,"children":[]},{"name":"required","total_count":1,"children":[]},{"name":"signature","total_count":1,"children":[]},{"name":"sku","total_count":1,"children":[]},{"name":"sku","total_count":1,"children":[]},{"name":"title","total_count":1,"children":[]},{"name":"total_paise","total_count":1,"children":[]},{"name":"total_paise","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"unit_price_paise","total_count":1,"children":[]},{"name":"unit_price_paise","total_count":1,"children":[]}]},{"name":"index.ts","total_count":17,"children":[{"name":"ajv","total_count":1,"children":[]},{"name":"ChainValidationResult","total_count":1,"children":[]},{"name":"checkCartAgainstIntent()","total_count":1,"children":[]},{"name":"checkCartArithmetic()","total_count":1,"children":[]},{"name":"checkPaymentAgainstCart()","total_count":1,"children":[]},{"name":"compiledCart","total_count":1,"children":[]},{"name":"compiledIntent","total_count":1,"children":[]},{"name":"compiledPayment","total_count":1,"children":[]},{"name":"fail()","total_count":1,"children":[]},{"name":"formatAjvErrors()","total_count":1,"children":[]},{"name":"isIntentExpired()","total_count":1,"children":[]},{"name":"ok()","total_count":1,"children":[]},{"name":"validateCartMandate()","total_count":1,"children":[]},{"name":"validateIntentMandate()","total_count":1,"children":[]},{"name":"validateMandateChain()","total_count":1,"children":[]},{"name":"validatePaymentMandate()","total_count":1,"children":[]},{"name":"ValidationResult","total_count":1,"children":[]}]},{"name":"intent-mandate.schema.json","total_count":43,"children":[{"name":"$id","total_count":1,"children":[]},{"name":"$schema","total_count":1,"children":[]},{"name":"additionalProperties","total_count":1,"children":[]},{"name":"allowed_categories","total_count":1,"children":[]},{"name":"allowed_categories","total_count":1,"children":[]},{"name":"const","total_count":1,"children":[]},{"name":"contentEncoding","total_count":1,"children":[]},{"name":"created_at","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"exclusiveMinimum","total_count":1,"children":[]},{"name":"expiry_timestamp","total_count":1,"children":[]},{"name":"expiry_timestamp","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"intent_id","total_count":1,"children":[]},{"name":"intent_id","total_count":1,"children":[]},{"name":"items","total_count":1,"children":[]},{"name":"mandate_type","total_count":1,"children":[]},{"name":"max_paise","total_count":1,"children":[]},{"name":"max_paise","total_count":1,"children":[]},{"name":"maximum","total_count":1,"children":[]},{"name":"minItems","total_count":1,"children":[]},{"name":"pattern","total_count":1,"children":[]},{"name":"properties","total_count":1,"children":[]},{"name":"required","total_count":1,"children":[]},{"name":"signature","total_count":1,"children":[]},{"name":"title","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"uniqueItems","total_count":1,"children":[]}]},{"name":"mandates.ts","total_count":11,"children":[{"name":"AP2Mandate","total_count":1,"children":[]},{"name":"CartMandate","total_count":1,"children":[]},{"name":"CategorySlug","total_count":1,"children":[]},{"name":"IntentMandate","total_count":1,"children":[]},{"name":"ISODateTime","total_count":1,"children":[]},{"name":"LineItem","total_count":1,"children":[]},{"name":"Paise","total_count":1,"children":[]},{"name":"PaymentMandate","total_count":1,"children":[]},{"name":"PaymentMethod","total_count":1,"children":[]},{"name":"RFC-4122","total_count":1,"children":[]},{"name":"UUID","total_count":1,"children":[]}]},{"name":"payment-mandate.schema.json","total_count":41,"children":[{"name":"$id","total_count":1,"children":[]},{"name":"$schema","total_count":1,"children":[]},{"name":"additionalProperties","total_count":1,"children":[]},{"name":"CARD","total_count":1,"children":[]},{"name":"cart_id","total_count":1,"children":[]},{"name":"const","total_count":1,"children":[]},{"name":"contentEncoding","total_count":1,"children":[]},{"name":"created_at","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"description","total_count":1,"children":[]},{"name":"enum","total_count":1,"children":[]},{"name":"exclusiveMinimum","total_count":1,"children":[]},{"name":"final_paise","total_count":1,"children":[]},{"name":"final_paise","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"format","total_count":1,"children":[]},{"name":"intent_reference","total_count":1,"children":[]},{"name":"mandate_type","total_count":1,"children":[]},{"name":"NETBANKING","total_count":1,"children":[]},{"name":"payment_id","total_count":1,"children":[]},{"name":"payment_id","total_count":1,"children":[]},{"name":"payment_method","total_count":1,"children":[]},{"name":"properties","total_count":1,"children":[]},{"name":"required","total_count":1,"children":[]},{"name":"signature","total_count":1,"children":[]},{"name":"title","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"type","total_count":1,"children":[]},{"name":"UPI","total_count":1,"children":[]},{"name":"WALLET","total_count":1,"children":[]}]},{"name":"validate.js","total_count":24,"children":[{"name":"CART_PROPS","total_count":1,"children":[]},{"name":"checkCartAgainstIntent()","total_count":1,"children":[]},{"name":"checkCartArithmetic()","total_count":1,"children":[]},{"name":"checkNoExtraProps()","total_count":1,"children":[]},{"name":"checkPaymentAgainstCart()","total_count":1,"children":[]},{"name":"fail()","total_count":1,"children":[]},{"name":"INTENT_PROPS","total_count":1,"children":[]},{"name":"isDateTime()","total_count":1,"children":[]},{"name":"isInteger()","total_count":1,"children":[]},{"name":"isIntentExpired()","total_count":1,"children":[]},{"name":"isPlainObject()","total_count":1,"children":[]},{"name":"isString()","total_count":1,"children":[]},{"name":"isUuid()","total_count":1,"children":[]},{"name":"LINE_ITEM_PROPS","total_count":1,"children":[]},{"name":"ok()","total_count":1,"children":[]},{"name":"PAYMENT_METHODS","total_count":1,"children":[]},{"name":"PAYMENT_PROPS","total_count":1,"children":[]},{"name":"RFC-3339","total_count":1,"children":[]},{"name":"RFC-4122","total_count":1,"children":[]},{"name":"validateCartMandate()","total_count":1,"children":[]},{"name":"validateIntentMandate()","total_count":1,"children":[]},{"name":"validateLineItem()","total_count":1,"children":[]},{"name":"validateMandateChain()","total_count":1,"children":[]},{"name":"validatePaymentMandate()","total_count":1,"children":[]}]}]},{"name":"scripts","total_count":15,"children":[{"name":"seed_massive.js","total_count":6,"children":[{"name":"categories","total_count":1,"children":[]},{"name":"Database","total_count":1,"children":[]},{"name":"db","total_count":1,"children":[]},{"name":"dbPath","total_count":1,"children":[]},{"name":"insert","total_count":1,"children":[]},{"name":"path","total_count":1,"children":[]}]},{"name":"verify_flow.js","total_count":9,"children":[{"name":"app","total_count":1,"children":[]},{"name":"assert()","total_count":1,"children":[]},{"name":"http","total_count":1,"children":[]},{"name":"inject()","total_count":1,"children":[]},{"name":"intentMandate()","total_count":1,"children":[]},{"name":"main()","total_count":1,"children":[]},{"name":"path","total_count":1,"children":[]},{"name":"paymentMandate()","total_count":1,"children":[]},{"name":"rzpClientPath","total_count":1,"children":[]}]}]},{"name":"src","total_count":150,"children":[{"name":"config","total_count":4,"children":[{"name":"index.js","total_count":4,"children":[{"name":"ADR-0003","total_count":1,"children":[]},{"name":"ADR-0004","total_count":1,"children":[]},{"name":"config","total_count":1,"children":[]},{"name":"dotenv","total_count":1,"children":[]}]}]},{"name":"db.js","total_count":4,"children":[{"name":"Database","total_count":1,"children":[]},{"name":"db","total_count":1,"children":[]},{"name":"dbPath","total_count":1,"children":[]},{"name":"path","total_count":1,"children":[]}]},{"name":"lib","total_count":41,"children":[{"name":"auditLog.js","total_count":13,"children":[{"name":"Actor","total_count":1,"children":[]},{"name":"ADR-0005","total_count":1,"children":[]},{"name":"append()","total_count":1,"children":[]},{"name":"computeHash()","total_count":1,"children":[]},{"name":"createAuditLog()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"EventType","total_count":1,"children":[]},{"name":"GENESIS_PREV_HASH","total_count":1,"children":[]},{"name":"RFC-8785","total_count":1,"children":[]},{"name":"sha256Hex()","total_count":1,"children":[]},{"name":"sharedAuditLog","total_count":1,"children":[]},{"name":"verifyChain()","total_count":1,"children":[]},{"name":"{ canonicalize }","total_count":1,"children":[]}]},{"name":"razorpayClient.js","total_count":11,"children":[{"name":"ADR-0003","total_count":1,"children":[]},{"name":"ADR-0004","total_count":1,"children":[]},{"name":"ADR-0007","total_count":1,"children":[]},{"name":"cancelPaymentLink()","total_count":1,"children":[]},{"name":"config","total_count":1,"children":[]},{"name":"createOrder()","total_count":1,"children":[]},{"name":"createPaymentLink()","total_count":1,"children":[]},{"name":"fetchOrder()","total_count":1,"children":[]},{"name":"getInstance()","total_count":1,"children":[]},{"name":"Razorpay","total_count":1,"children":[]},{"name":"withRetry()","total_count":1,"children":[]}]},{"name":"razorpayIdempotencyWrapper.js","total_count":15,"children":[{"name":".constructor()","total_count":1,"children":[]},{"name":".constructor()","total_count":1,"children":[]},{"name":"clear()","total_count":1,"children":[]},{"name":"createIdempotencyWrapper()","total_count":1,"children":[]},{"name":"execute()","total_count":1,"children":[]},{"name":"generateIdempotencyKey()","total_count":1,"children":[]},{"name":"getStatus()","total_count":1,"children":[]},{"name":"IdempotencyKeyError","total_count":1,"children":[]},{"name":"isNetworkError()","total_count":1,"children":[]},{"name":"isValidIdempotencyKey()","total_count":1,"children":[]},{"name":"NETWORK_ERROR_CODES","total_count":1,"children":[]},{"name":"RazorpayRequestError","total_count":1,"children":[]},{"name":"readEntry()","total_count":1,"children":[]},{"name":"size()","total_count":1,"children":[]},{"name":"{ randomUUID }","total_count":1,"children":[]}]},{"name":"verifyRazorpaySignature.js","total_count":2,"children":[{"name":"crypto","total_count":1,"children":[]},{"name":"verifyRazorpaySignature()","total_count":1,"children":[]}]}]},{"name":"mcp","total_count":28,"children":[{"name":"merchantClient.js","total_count":22,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"ADR-0006","total_count":1,"children":[]},{"name":"buildCartResult()","total_count":1,"children":[]},{"name":"buildRequestedItems()","total_count":1,"children":[]},{"name":"callMerchant()","total_count":1,"children":[]},{"name":"cancel_checkout()","total_count":1,"children":[]},{"name":"complete_checkout()","total_count":1,"children":[]},{"name":"create_cart()","total_count":1,"children":[]},{"name":"createMerchantTools()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"enrichStateWithRupees()","total_count":1,"children":[]},{"name":"get_cart_state()","total_count":1,"children":[]},{"name":"RFC-8785","total_count":1,"children":[]},{"name":"rupeesToPaise()","total_count":1,"children":[]},{"name":"search_catalog()","total_count":1,"children":[]},{"name":"STOREFRONT_CATEGORIES","total_count":1,"children":[]},{"name":"throwIfUnrecoverable()","total_count":1,"children":[]},{"name":"TOOL_DEFINITIONS","total_count":1,"children":[]},{"name":"update_cart()","total_count":1,"children":[]},{"name":"withAudit()","total_count":1,"children":[]},{"name":"{ sharedAuditLog, EventType, Actor }","total_count":1,"children":[]},{"name":"{ sign }","total_count":1,"children":[]}]},{"name":"server.js","total_count":6,"children":[{"name":"main()","total_count":1,"children":[]},{"name":"{\n  ListToolsRequestSchema,\n  CallToolRequestSchema,\n}","total_count":1,"children":[]},{"name":"{ Server }","total_count":1,"children":[]},{"name":"{ StdioServerTransport }","total_count":1,"children":[]},{"name":"{ TOOL_DEFINITIONS, createMerchantTools }","total_count":1,"children":[]},{"name":"{ version }","total_count":1,"children":[]}]}]},{"name":"middleware","total_count":13,"children":[{"name":"guardrails.js","total_count":13,"children":[{"name":"ADR-0006","total_count":1,"children":[]},{"name":"checkCategoryAllowlist()","total_count":1,"children":[]},{"name":"checkQuantityLimits()","total_count":1,"children":[]},{"name":"createReplayTracker()","total_count":1,"children":[]},{"name":"createVelocityTracker()","total_count":1,"children":[]},{"name":"DEFAULT_VELOCITY","total_count":1,"children":[]},{"name":"describeFailure()","total_count":1,"children":[]},{"name":"errorCodeFor()","total_count":1,"children":[]},{"name":"evaluateCartGuardrails()","total_count":1,"children":[]},{"name":"evaluatePaymentGuardrails()","total_count":1,"children":[]},{"name":"GUARDRAIL_ERROR_CODES","total_count":1,"children":[]},{"name":"statusFor()","total_count":1,"children":[]},{"name":"windowFor()","total_count":1,"children":[]}]}]},{"name":"routes","total_count":41,"children":[{"name":"checkout.js","total_count":23,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"ADR-0006","total_count":1,"children":[]},{"name":"ADR-0007","total_count":1,"children":[]},{"name":"auditGuardrailDecisions()","total_count":1,"children":[]},{"name":"buildCartMandate()","total_count":1,"children":[]},{"name":"commitMoneyAction()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"db","total_count":1,"children":[]},{"name":"errorResponse()","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"generateId()","total_count":1,"children":[]},{"name":"now()","total_count":1,"children":[]},{"name":"replayTracker","total_count":1,"children":[]},{"name":"resolveLineItems()","total_count":1,"children":[]},{"name":"router","total_count":1,"children":[]},{"name":"rzpIdempotency","total_count":1,"children":[]},{"name":"sessions","total_count":1,"children":[]},{"name":"sessionToResponse()","total_count":1,"children":[]},{"name":"velocityTracker","total_count":1,"children":[]},{"name":"{\n  evaluateCartGuardrails,\n  evaluatePaymentGuardrails,\n  createReplayTracker,\n  createVelocityTracker,\n  errorCodeFor,\n  statusFor,\n  describeFailure,\n}","total_count":1,"children":[]},{"name":"{\n  validateIntentMandate,\n  validateCartMandate,\n  checkCartArithmetic,\n  isIntentExpired,\n  validateMandateChain,\n}","total_count":1,"children":[]},{"name":"{ createIdempotencyWrapper }","total_count":1,"children":[]},{"name":"{ sharedAuditLog, EventType, Actor }","total_count":1,"children":[]}]},{"name":"orders.js","total_count":7,"children":[{"name":"ADR-0003","total_count":1,"children":[]},{"name":"ADR-0005","total_count":1,"children":[]},{"name":"config","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"razorpayClient","total_count":1,"children":[]},{"name":"router","total_count":1,"children":[]},{"name":"{ sharedAuditLog, EventType, Actor }","total_count":1,"children":[]}]},{"name":"products.js","total_count":3,"children":[{"name":"db","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"router","total_count":1,"children":[]}]},{"name":"webhooks.js","total_count":8,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"ADR-0007","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"processedEventIds","total_count":1,"children":[]},{"name":"router","total_count":1,"children":[]},{"name":"TODO: Drive state machine \u2192 FAILED (Day 12)","total_count":1,"children":[]},{"name":"{ sharedAuditLog, EventType, Actor }","total_count":1,"children":[]},{"name":"{ verifyRazorpaySignature }","total_count":1,"children":[]}]}]},{"name":"server.js","total_count":19,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"ADR-0006","total_count":1,"children":[]},{"name":"app","total_count":1,"children":[]},{"name":"checkoutRouter","total_count":1,"children":[]},{"name":"config","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"getAiRuntime()","total_count":1,"children":[]},{"name":"merchantTools","total_count":1,"children":[]},{"name":"ordersRouter","total_count":1,"children":[]},{"name":"path","total_count":1,"children":[]},{"name":"productsRouter","total_count":1,"children":[]},{"name":"RFC-8785","total_count":1,"children":[]},{"name":"sessionIdFromPath()","total_count":1,"children":[]},{"name":"verifyMandateSignature","total_count":1,"children":[]},{"name":"webhookRouter","total_count":1,"children":[]},{"name":"{ createMerchantTools, TOOL_DEFINITIONS }","total_count":1,"children":[]},{"name":"{ sharedAuditLog, EventType, Actor, GENESIS_PREV_HASH }","total_count":1,"children":[]},{"name":"{ verifySignature }","total_count":1,"children":[]}]}]},{"name":"tests","total_count":56,"children":[{"name":"auditLog.test.js","total_count":2,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"{\n  createAuditLog,\n  computeHash,\n  GENESIS_PREV_HASH,\n  EventType,\n  Actor,\n}","total_count":1,"children":[]}]},{"name":"auditWiring.test.js","total_count":6,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"ALL_ZERO","total_count":1,"children":[]},{"name":"app","total_count":1,"children":[]},{"name":"{ handle }","total_count":1,"children":[]},{"name":"{ sharedAuditLog }","total_count":1,"children":[]},{"name":"{ sign }","total_count":1,"children":[]}]},{"name":"chat.test.js","total_count":3,"children":[{"name":"loadApp()","total_count":1,"children":[]},{"name":"postChat()","total_count":1,"children":[]},{"name":"{ handle }","total_count":1,"children":[]}]},{"name":"chatThinking.test.js","total_count":3,"children":[{"name":"loadApp()","total_count":1,"children":[]},{"name":"postThinking()","total_count":1,"children":[]},{"name":"{ handle }","total_count":1,"children":[]}]},{"name":"checkout.test.js","total_count":6,"children":[{"name":"app","total_count":1,"children":[]},{"name":"checkoutRouter","total_count":1,"children":[]},{"name":"createSession()","total_count":1,"children":[]},{"name":"request","total_count":1,"children":[]},{"name":"stubIntentMandate()","total_count":1,"children":[]},{"name":"stubPaymentMandate()","total_count":1,"children":[]}]},{"name":"guardrails.test.js","total_count":4,"children":[{"name":"ADR-0006","total_count":1,"children":[]},{"name":"AUDIO_ITEM","total_count":1,"children":[]},{"name":"WEARABLE_ITEM","total_count":1,"children":[]},{"name":"{\n  GUARDRAIL_ERROR_CODES,\n  statusFor,\n  errorCodeFor,\n  describeFailure,\n  checkCategoryAllowlist,\n  checkQuantityLimits,\n  createReplayTracker,\n  createVelocityTracker,\n  evaluateCartGuardrails,\n  evaluatePaymentGuardrails,\n}","total_count":1,"children":[]}]},{"name":"helpers","total_count":10,"children":[{"name":"mockHttp.js","total_count":10,"children":[{"name":".getHeader()","total_count":1,"children":[]},{"name":".removeHeader()","total_count":1,"children":[]},{"name":".setHeader()","total_count":1,"children":[]},{"name":".write()","total_count":1,"children":[]},{"name":".writeHead()","total_count":1,"children":[]},{"name":"handle()","total_count":1,"children":[]},{"name":"mockReq()","total_count":1,"children":[]},{"name":"mockRes()","total_count":1,"children":[]},{"name":"res","total_count":1,"children":[]},{"name":"{ Readable }","total_count":1,"children":[]}]}]},{"name":"mcpMerchantTools.test.js","total_count":8,"children":[{"name":"FEED","total_count":1,"children":[]},{"name":"jsonResponse()","total_count":1,"children":[]},{"name":"makeFetch()","total_count":1,"children":[]},{"name":"RFC-8785","total_count":1,"children":[]},{"name":"{ canonicalize, sign }","total_count":1,"children":[]},{"name":"{ createAuditLog }","total_count":1,"children":[]},{"name":"{ TOOL_DEFINITIONS, createMerchantTools }","total_count":1,"children":[]},{"name":"{ verifyRazorpaySignature }","total_count":1,"children":[]}]},{"name":"mockProductFeed.test.js","total_count":1,"children":[{"name":"{ getMockProductFeed, rupeesToPaise }","total_count":1,"children":[]}]},{"name":"ordersAudit.test.js","total_count":4,"children":[{"name":"ADR-0005","total_count":1,"children":[]},{"name":"app","total_count":1,"children":[]},{"name":"{ handle }","total_count":1,"children":[]},{"name":"{ sharedAuditLog }","total_count":1,"children":[]}]},{"name":"razorpayIdempotencyWrapper.test.js","total_count":1,"children":[{"name":"{\n  createIdempotencyWrapper,\n  generateIdempotencyKey,\n  isValidIdempotencyKey,\n  isNetworkError,\n  IdempotencyKeyError,\n  RazorpayRequestError,\n}","total_count":1,"children":[]}]},{"name":"server.test.js","total_count":4,"children":[{"name":"app","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"request","total_count":1,"children":[]},{"name":"signBody()","total_count":1,"children":[]}]},{"name":"verifyRazorpaySignature.test.js","total_count":4,"children":[{"name":"crypto","total_count":1,"children":[]},{"name":"RAW_BODY","total_count":1,"children":[]},{"name":"signBody()","total_count":1,"children":[]},{"name":"{ verifyRazorpaySignature }","total_count":1,"children":[]}]}]},{"name":"verify-signature-middleware.js","total_count":9,"children":[{"name":"assertValidSecret()","total_count":1,"children":[]},{"name":"crypto","total_count":1,"children":[]},{"name":"isJsonContentType()","total_count":1,"children":[]},{"name":"onAborted()","total_count":1,"children":[]},{"name":"onData()","total_count":1,"children":[]},{"name":"onEnd()","total_count":1,"children":[]},{"name":"onError()","total_count":1,"children":[]},{"name":"reject()","total_count":1,"children":[]},{"name":"verifySignature()","total_count":1,"children":[]}]},{"name":"eslint.config.js","total_count":1,"children":[]},{"name":"express","total_count":1,"children":[]},{"name":"jest.config.js","total_count":1,"children":[]}]};
+
+    function transformData(jsonData) {
+        // Helper function to recursively build the children structure
+        function processNode(node, parentL1StageName) {
+            let displayName = node.name;
+            // Append total_count if it exists and is not already in the name
+            if (node.total_count !== undefined) {
+                if (!/\(Total Count: \d+\)$/.test(displayName)) {
+                    displayName += ` (Total Count: ${node.total_count})`;
+                }
+            }
+
+            const newNode = { name: displayName };
+
+            if (parentL1StageName === "Root") {
+                 newNode.originalStageName = node.name;
+            } else {
+                newNode.originalStageName = parentL1StageName;
+            }
+
+            if (node.children && node.children.length > 0) {
+                const stageNameToPass = (parentL1StageName === "Root") ? node.name : parentL1StageName;
+                newNode.children = node.children.map(child => processNode(child, stageNameToPass));
+            }
+
+            return newNode;
+        }
+
+        let rootDisplayName = jsonData.name;
+        if (jsonData.total_count !== undefined && !/\(Total Count: \d+\)$/.test(rootDisplayName)) {
+            rootDisplayName += ` (Total Count: ${jsonData.total_count})`;
+        }
+
+        return {
+            name: rootDisplayName,
+            originalStageName: "Root",
+            children: (jsonData.children || []).map(child => processNode(child, "Root"))
+        };
+    }
+
+    const treeData = transformData(initialJsonData);
+
+    // Auto-populated phaseColors: every depth-1 child of the root gets
+    // a stable colour from a bigger palette so all top-level dirs are
+    // distinguishable.
+    const PALETTE = [
+      ["#3498DB","#2980B9","#AED6F1"], ["#2ECC71","#27AE60","#A9DFBF"],
+      ["#E74C3C","#C0392B","#F5B7B1"], ["#9B59B6","#8E44AD","#D7BDE2"],
+      ["#F39C12","#D68910","#FAD7A0"], ["#1ABC9C","#117864","#A2D9CE"],
+      ["#34495E","#1B2631","#ABB2B9"], ["#E67E22","#BA4A00","#F5CBA7"],
+      ["#16A085","#0E6655","#A2D9CE"], ["#D35400","#A04000","#EDBB99"],
+      ["#7F8C8D","#566573","#D5DBDB"], ["#C0392B","#7B241C","#F5B7B1"],
+      ["#2E86C1","#1B4F72","#A9CCE3"], ["#28B463","#196F3D","#A9DFBF"],
+      ["#AF7AC5","#6C3483","#D2B4DE"],
+    ];
+    const phaseColors = { "Root": { fill: "#4A4A4A", stroke: "#333333", collapsedFill: "#6C757D" },
+                          "Default": { fill: "#BDC3C7", stroke: "#95A5A6", collapsedFill: "#ECF0F1" } };
+    (initialJsonData.children || []).forEach((c, i) => {
+      const pal = PALETTE[i % PALETTE.length];
+      phaseColors[c.name] = { fill: pal[0], stroke: pal[1], collapsedFill: pal[2] };
+    });
+
+    const levelSpecificPalettes = {
+      0: { fill: "#4A4A4A", stroke: "#333333", collapsedFill: "#6C757D" },
+      2: { fill: "#6ab04c", stroke: "#508a38", collapsedFill: "#a3d391" },
+      3: { fill: "#f0932b", stroke: "#d0730f", collapsedFill: "#f6c07e" },
+      4: { fill: "#be2edd", stroke: "#a01cb3", collapsedFill: "#e08bf2" },
+      5: { fill: "#00a8ff", stroke: "#007ac1", collapsedFill: "#74d2ff" },
+      6: { fill: "#e55039", stroke: "#c23620", collapsedFill: "#f09a8d" },
+      default: { fill: "#747d8c", stroke: "#57606f", collapsedFill: "#a4b0be" }
+    };
+
+    const svgElement = d3.select("#tree-svg");
+    const initialSvgWidth = +svgElement.attr("width");
+    const initialSvgHeight = +svgElement.attr("height");
+    const margin = { top: 40, right: 120, bottom: 80, left: 450 };
+    let width = initialSvgWidth - margin.left - margin.right;
+    let height = initialSvgHeight - margin.top - margin.bottom;
+    const duration = 500;
+    let nodeCounter = 0;
+    const g = svgElement.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+    const treemap = d3.tree().nodeSize([40, 0]);
+    let rootNode = d3.hierarchy(treeData, d => d.children);
+    rootNode.x0 = 0;
+    rootNode.y0 = 0;
+
+    if (rootNode.children) {
+      rootNode.children.forEach(d_child => {
+        if (d_child.children) { collapseBranch(d_child); }
+      });
+    }
+    updateTree(rootNode);
+
+    function collapseBranch(d) { if (d.children) { d._children = d.children; d._children.forEach(collapseBranch); d.children = null; } }
+    function expandBranch(d) { if (d._children) { d.children = d._children; d._children = null; } if (d.children) { d.children.forEach(expandBranch); } }
+    window.expandAll = () => { expandBranch(rootNode); updateTree(rootNode); };
+    window.collapseAll = () => { if (rootNode.children) { rootNode.children.forEach(collapseBranch); } updateTree(rootNode); };
+    window.resetView = () => { if (rootNode.children) { rootNode.children.forEach(d_child => { if (d_child.children || d_child._children) { collapseBranch(d_child); } }); } if (rootNode._children && !rootNode.children) { rootNode.children = rootNode._children; rootNode._children = null; } updateTree(rootNode); };
+
+    function updateTree(source) {
+      const treeLayoutData = treemap(rootNode);
+      let nodes = treeLayoutData.descendants();
+      let links = treeLayoutData.descendants().slice(1);
+
+      let minX = 0;
+      let maxX = 0;
+      if (nodes.length > 0) {
+        minX = d3.min(nodes, d => d.x);
+        maxX = d3.max(nodes, d => d.x);
+      }
+
+      let neededHeight = Math.max(initialSvgHeight, maxX - minX + margin.top + margin.bottom + 100);
+      svgElement.transition().duration(duration / 2).attr("height", neededHeight);
+      g.transition().duration(duration / 2).attr("transform", `translate(${margin.left},${margin.top - minX + 40})`);
+
+      nodes.forEach(d => { d.y = d.depth * 400; }); // Adjust horizontal separation if needed
+
+      const node = g.selectAll('g.node').data(nodes, d => d.id || (d.id = ++nodeCounter));
+      const nodeEnter = node.enter().append('g')
+        .attr('class', d => "node" + (d.children || d._children ? " node--internal" : " node--leaf") + (d._children ? " _children" : ""))
+        .attr('transform', d => `translate(${source.y0},${source.x0})`)
+        .on('click', (event, d) => { if (d.children) { d._children = d.children; d.children = null; } else if (d._children) { d.children = d._children; d._children = null; } updateTree(d); })
+        .style('cursor', d => (d.children || d._children) ? 'pointer' : 'default');
+
+      nodeEnter.append('circle').attr('r', 1e-6);
+
+      nodeEnter.append('text')
+        .attr('dy', '.35em')
+        .attr('x', d => d.children || d._children ? -14 : 14)
+        .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+        .style("fill-opacity", 1e-6)
+        .call(wrapText, 380);
+
+      const nodeUpdate = nodeEnter.merge(node);
+      nodeUpdate.transition().duration(duration)
+        .attr('transform', d => `translate(${d.y},${d.x})`)
+        .attr('class', d => "node" + (d.children ? " node--internal" : " node--leaf") + (d._children ? " node--internal _children" : ""));
+
+      nodeUpdate.select('circle').attr('r', 8.5)
+        .style('fill', d => {
+            let palette;
+            if (d.depth === 0) {
+                palette = levelSpecificPalettes[0];
+            } else if (d.depth === 1) {
+                palette = phaseColors[d.data.originalStageName] || phaseColors.Default;
+            } else {
+                palette = levelSpecificPalettes[d.depth] || levelSpecificPalettes.default;
+            }
+            if (d._children) return palette.collapsedFill;
+            if (d.children) return palette.fill;
+            return "#fff";
+        })
+        .style('stroke', d => {
+            let palette;
+            if (d.depth === 0) {
+                palette = levelSpecificPalettes[0];
+            } else if (d.depth === 1) {
+                palette = phaseColors[d.data.originalStageName] || phaseColors.Default;
+            } else {
+                palette = levelSpecificPalettes[d.depth] || levelSpecificPalettes.default;
+            }
+            return palette.stroke;
+        });
+      nodeUpdate.select('text').style("fill-opacity", 1).call(wrapText, 380);
+
+      const nodeExit = node.exit().transition().duration(duration).attr('transform', d => `translate(${source.y},${source.x})`).remove();
+      nodeExit.select('circle').attr('r', 1e-6);
+      nodeExit.select('text').style('fill-opacity', 1e-6);
+
+      const link = g.selectAll('path.link').data(links, d => d.id);
+      const linkEnter = link.enter().insert('path', "g").attr('class', 'link').attr('d', d => { const o = { x: source.x0, y: source.y0 }; return diagonal(o, o); });
+
+      linkEnter.merge(link).transition().duration(duration).attr('d', d => diagonal(d, d.parent))
+        .style('stroke', d => {
+            const sourceNode = d.parent;
+            if (!sourceNode) return phaseColors.Default.stroke;
+            const l1AncestorName = sourceNode.data.originalStageName;
+            const colorPalette = phaseColors[l1AncestorName] || phaseColors.Default;
+            return colorPalette.stroke;
+        });
+      link.exit().transition().duration(duration).attr('d', d => { const o = { x: source.x, y: source.y }; return diagonal(o, o); }).remove();
+      nodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+    }
+
+    function diagonal(s, d) { return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`; }
+
+    function wrapText(textElements, maxWidth) {
+        const textPartColors = {
+            name: '#343a40',
+            count: '#0056b3'
+        };
+        const countRegex = /(\s\(Total Count: \d+\))$/;
+
+        textElements.each(function () {
+            const textD3 = d3.select(this);
+            const originalNodeText = textD3.datum().data.name;
+            const x = parseFloat(textD3.attr("x") || 0);
+            const initialDy = textD3.attr("dy");
+            const textAnchor = textD3.attr("text-anchor");
+            const lineHeight = 1.1;
+
+            textD3.text(null);
+
+            let namePart = originalNodeText;
+            let countPartText = "";
+
+            const countMatch = originalNodeText.match(countRegex);
+            if (countMatch && originalNodeText.endsWith(countMatch[0])) {
+                namePart = originalNodeText.substring(0, originalNodeText.length - countMatch[0].length).trim();
+                countPartText = countMatch[0].trim();
+            }
+
+            const tokens = [];
+            namePart.split(/\s+/).filter(Boolean).forEach(word => {
+                tokens.push({ text: word, type: 'name' });
+            });
+            if (countPartText) {
+                tokens.push({ text: countPartText, type: 'count' });
+            }
+
+            if (tokens.length === 0 && originalNodeText) {
+                tokens.push({ text: originalNodeText, type: 'name' });
+            }
+
+            let currentTspan = textD3.append("tspan").attr("x", x).attr("dy", initialDy);
+            if (textAnchor === "end") currentTspan.attr("text-anchor", "end");
+
+            let lineTokens = [];
+
+            for (let i = 0; i < tokens.length; i++) {
+                const tokenObj = tokens[i];
+
+                lineTokens.push(tokenObj);
+                currentTspan.text(lineTokens.map(t => t.text).join(" "));
+
+                if (currentTspan.node().getComputedTextLength() > maxWidth && lineTokens.length > 1) {
+                    lineTokens.pop();
+
+                    currentTspan.text(null);
+                    lineTokens.forEach((prevToken, idx) => {
+                        currentTspan.append("tspan")
+                            .text((idx > 0 ? " " : "") + prevToken.text)
+                            .style("fill", textPartColors[prevToken.type] || textPartColors.name)
+                            .style("font-weight", prevToken.type === 'count' ? "bold" : "normal");
+                    });
+
+                    lineTokens = [tokenObj];
+                    currentTspan = textD3.append("tspan").attr("x", x).attr("dy", lineHeight + "em");
+                    if (textAnchor === "end") currentTspan.attr("text-anchor", "end");
+                }
+            }
+
+            currentTspan.text(null);
+            lineTokens.forEach((token, idx) => {
+                currentTspan.append("tspan")
+                    .text((idx > 0 ? " " : "") + token.text)
+                    .style("fill", textPartColors[token.type] || textPartColors.name)
+                    .style("font-weight", token.type === 'count' ? "bold" : "normal");
+            });
+
+            if (textD3.selectAll("tspan > tspan").empty() && textD3.select("tspan").text().length === 0 && originalNodeText) {
+                let t = textD3.select("tspan");
+                let displayText = originalNodeText;
+                t.text(displayText).style("fill", textPartColors.name);
+                if (t.node() && t.node().getComputedTextLength() > maxWidth && displayText.length > 20) {
+                    let estimatedChars = Math.floor(maxWidth / (t.node().getComputedTextLength()/displayText.length) );
+                    displayText = displayText.substring(0, Math.max(0, estimatedChars - 3)) + "...";
+                    t.text(displayText);
+                }
+            }
+        });
+    }
+  </script>
+</body>
+</html>

@@ -181,4 +181,27 @@ describe('createIdempotencyWrapper().execute', () => {
     expect(wrapperA.getStatus(key)).toBe('success');
     expect(wrapperB.getStatus(key)).toBeUndefined();
   });
+
+  test('scopes the cache by options.scope: the same key under two scopes does not collide', async () => {
+    // Regression for the cross-session idempotency-replay vector: an attacker
+    // replays session A's Idempotency-Key on a validly-signed session B. With
+    // per-session scoping, session B must NOT receive session A's cached order.
+    const fnA = jest.fn().mockResolvedValue({ id: 'order_for_session_A' });
+    const fnB = jest.fn().mockResolvedValue({ id: 'order_for_session_B' });
+    const replayedKey = generateIdempotencyKey('idem');
+
+    const a = await wrapper.execute(replayedKey, fnA, { scope: 'acp_sess_A' });
+    const b = await wrapper.execute(replayedKey, fnB, { scope: 'acp_sess_B' });
+
+    expect(a).toEqual({ id: 'order_for_session_A' });
+    expect(b).toEqual({ id: 'order_for_session_B' }); // NOT session A's order
+    expect(fnA).toHaveBeenCalledTimes(1);
+    expect(fnB).toHaveBeenCalledTimes(1);
+
+    // A legitimate same-scope, same-key retry still replays the cached response
+    // (idempotency preserved — Razorpay is not called a second time).
+    const aRetry = await wrapper.execute(replayedKey, fnA, { scope: 'acp_sess_A' });
+    expect(aRetry).toEqual({ id: 'order_for_session_A' });
+    expect(fnA).toHaveBeenCalledTimes(1);
+  });
 });
