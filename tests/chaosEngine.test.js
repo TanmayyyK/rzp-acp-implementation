@@ -151,7 +151,6 @@ describe('cardDecline', () => {
   });
 
   test('successive emits get distinct event ids (real handler dedupes on id)', () => {
-    const req = () => mockReq({ headers: { 'x-chaos-mode': CHAOS_MODES.CARD_DECLINE } });
     const a = mockReq({ headers: { 'x-chaos-mode': CHAOS_MODES.CARD_DECLINE } });
     const b = mockReq({ headers: { 'x-chaos-mode': CHAOS_MODES.CARD_DECLINE } });
     cardDecline(a, mockRes(), jest.fn());

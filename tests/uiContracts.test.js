@@ -101,7 +101,7 @@ describe('UI contract: POST /chat (useChat -> agent + receipt bubbles)', () => {
     expect(body[0].content.length).toBeGreaterThan(0);
   });
 
-  it('purchase within budget returns a confirmed receipt whose refId is a real money block on the chain', async () => {
+  it('safe-preview purchase returns no receipt and no fabricated money block', async () => {
     const before = (await get('/audit-log')).body.count;
 
     const { statusCode, body } = await post('/chat', {
@@ -112,27 +112,12 @@ describe('UI contract: POST /chat (useChat -> agent + receipt bubbles)', () => {
     expect(statusCode).toBe(200);
     expect(Array.isArray(body)).toBe(true);
 
-    const receipt = body.find((m) => m.role === 'receipt');
-    expect(receipt).toBeDefined();
-    const d = receipt.data;
-    // Fields the ReceiptCard renders (rupees, client-formatted).
-    expect(d.status).toBe('confirmed');
-    expect(typeof d.orderId).toBe('string');
-    expect(typeof d.subtotal).toBe('number');
-    expect(typeof d.tax).toBe('number');
-    expect(typeof d.total).toBe('number');
-    expect(Array.isArray(d.items)).toBe(true);
-    expect(typeof d.refId).toBe('string');
-    expect(d.refId.length).toBeGreaterThan(0);
-
-    // The turn appended real blocks; the receipt's refId IS the money block hash
-    // (the receipt chain-chip deep-links the Trust Center to exactly this block).
+    expect(body.find((m) => m.role === 'receipt')).toBeUndefined();
+    expect(body[0].content).toMatch(/simulation is disabled/i);
     const after = await get('/audit-log');
     expect(after.body.count).toBeGreaterThan(before);
-    const moneyBlock = after.body.entries.find((e) => e.hash === d.refId);
-    expect(moneyBlock).toBeDefined();
-    expect(moneyBlock.event_type).toBe('MONEY_ACTION');
-    // amountPaiseOf() reads amount_rupees*100 or amount_paise off this payload.
-    expect(moneyBlock.payload.amount_rupees).toBe(d.total);
+    const added = after.body.entries.slice(before);
+    expect(added.map((entry) => entry.event_type)).toEqual(['AGENT_REASONING']);
+    expect(added.some((entry) => entry.event_type === 'MONEY_ACTION')).toBe(false);
   });
 });

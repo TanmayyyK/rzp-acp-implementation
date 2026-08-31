@@ -9,8 +9,17 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET must be configured in production');
+}
+
 const config = {
   port: parseInt(process.env.PORT, 10) || 3000,
+  isProduction,
+  sessionSecret: process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex'),
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://localhost:3001')
+    .split(',').map((origin) => origin.trim()).filter(Boolean),
 
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',

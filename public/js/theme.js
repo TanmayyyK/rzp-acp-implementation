@@ -31,7 +31,7 @@
   }
 
   function persist(theme) {
-    try { localStorage.setItem(STORAGE_KEY, theme); } catch (e) { /* private mode: session-only */ }
+    try { localStorage.setItem(STORAGE_KEY, theme); } catch (_e) { /* private mode: session-only */ }
   }
 
   window.Theme = {

@@ -1323,7 +1323,7 @@ body.drawer-open { overflow: hidden; }
       var hero = el('div', 'hero');
       hero.appendChild(el('div', 'hero-badge', { html: S.icon('shield') + '<span>Razorpay Agent · ACP 2.0 + AP2</span>' }));
       hero.appendChild(el('h1', 'hero-title', { text: 'What would you like to buy today?' }));
-      hero.appendChild(el('p', 'hero-sub', { text: 'Your buyer agent searches, checks it against your budget mandate, and settles on Razorpay rails — every step written to a tamper-evident audit chain.' }));
+      hero.appendChild(el('p', 'hero-sub', { text: 'Your buyer agent checks signed authority before creating a Razorpay payment request; verified webhooks mark it paid.' }));
       var chips = el('div', 'hero-chips');
       EXAMPLES.forEach(function (ex) {
         var chip = el('button', 'hero-chip', { type: 'button', text: ex });
@@ -1370,7 +1370,7 @@ body.drawer-open { overflow: hidden; }
       box.appendChild(input);
       box.appendChild(tools);
       form.appendChild(box);
-      form.appendChild(el('p', 'composer-hint', { html: 'Amounts stay under your budget mandate · settled on Razorpay test rails' }));
+      form.appendChild(el('p', 'composer-hint', { html: 'Amounts stay under signed authority · payment is pending until Razorpay confirms it' }));
 
       region.appendChild(scroll);
       region.appendChild(form);

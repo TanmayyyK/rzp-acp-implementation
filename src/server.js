@@ -13,7 +13,6 @@
 
 const express = require('express');
 const path = require('path');
-const crypto = require('crypto');
 const config = require('./config');
 const { generateEd25519KeyPair } = require('./lib/jcs-eddsa');
 
@@ -50,6 +49,7 @@ const userRouter = require('./routes/user');
 // IntentMandate with their own authenticator (ADR-008).
 const mandatesRouter = require('./routes/mandates');
 const session = require('express-session');
+const { SqliteSessionStore } = require('./lib/sqliteSessionStore');
 
 const app = express();
 
@@ -57,7 +57,12 @@ const app = express();
 // 0. CORS & Cross-Origin support (for Next.js frontend on port 3001)
 // ==========================================
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && config.allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Idempotency-Key');
   if (req.method === 'OPTIONS') {
@@ -97,12 +102,14 @@ app.use('/api/v1/webhooks/razorpay', express.raw({ type: 'application/json' }), 
 app.use(express.json());
 
 app.use(session({
-  secret: 'super-secret-key-for-dev',
+  secret: config.sessionSecret,
+  store: new SqliteSessionStore(),
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // In production this should be true for HTTPS
+    secure: config.isProduction,
     httpOnly: true,
+    sameSite: 'lax',
   }
 }));
 
@@ -141,13 +148,26 @@ app.get('/health', (_req, res) => {
 //    Returns every block in order, plus the genesis anchor and a live
 //    verifyChain() integrity result so the UI can prove the log is untampered.
 // ==========================================
-app.get('/audit-log', (_req, res) => {
+app.get('/audit-log', (req, res) => {
+  const isAdmin = req.headers['authorization'] === `Bearer ${process.env.ADMIN_SECRET || 'admin_secret'}`;
   const entries = auditLog.entries();
+
+  let returnedEntries = entries;
+  if (!isAdmin) {
+    returnedEntries = entries.map(entry => {
+      // Deep clone payload to redact
+      const payloadStr = JSON.stringify(entry.payload || {});
+      const redactedStr = payloadStr
+        .replace(/"(session_id|intent_mandate_id|credential_id|mandate_id|order_id|razorpay_order_id|receipt|payment_id|payment_link_id|agent_id|principal_id)":"[^"]+"/g, '"$1":"[REDACTED]"');
+      return { ...entry, payload: JSON.parse(redactedStr) };
+    });
+  }
+
   res.json({
     genesis_hash: GENESIS_PREV_HASH,
     count: entries.length,
     integrity: auditLog.verifyChain(),
-    entries,
+    entries: returnedEntries,
   });
 });
 
@@ -344,7 +364,7 @@ app.post('/chat/thinking', async (req, res) => {
 });
 
 app.post('/chat', async (req, res) => {
-  const { message, messages, provider, budget } = req.body || {};
+  const { message, messages, provider } = req.body || {};
   let conversation = [];
   let text = '';
   
@@ -355,10 +375,8 @@ app.post('/chat', async (req, res) => {
     text = message.trim();
     conversation = [{ role: 'user', content: text }];
   }
-  // The spend ceiling the user allocated in the composer is the IntentMandate cap
-  // for this purchase — stub and live alike. Fall back to the system auto-approve
-  // ceiling when no budget is sent (older clients and the existing test suite).
-  const budgetRupees = Number.isFinite(budget) && budget > 0 ? budget : AUTO_APPROVE_RUPEES;
+  // A UI budget is context for the live agent, never authority. Authority is
+  // created only by the signed-delegation flow in guarded checkout.
 
   // Record reasoning
   auditLog.append({
@@ -369,90 +387,13 @@ app.post('/chat', async (req, res) => {
   });
 
   if (provider === 'stub' || !provider) {
-    if (!PURCHASE_INTENT_RE.test(text)) {
-      return res.json([
-        {
-          role: 'agent',
-          content: `Got it. Tell me what to find, compare, or buy and I'll take it from there. (model: stub)`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-    const subtotal = 2000 + Math.floor(Math.random() * 12000);
-    const tax = Math.round(subtotal * 0.18);
-    const total = subtotal + tax;
-    const escalated = total > budgetRupees;
-    const status = escalated ? 'pending_approval' : 'confirmed';
-    const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
-    const itemName = text.length > 40 ? `${text.slice(0, 40).trim()}…` : text || 'Requested item';
-
-    // Step 1 of the visible cycle — the agent "searches the catalog". The stub
-    // reasons and simulates (it does not call the MCP tools), so this is an honest
-    // AGENT_REASONING step, not a fabricated TOOL_CALL. The Inspector reveals it
-    // one line at a time alongside the mandate and money blocks below.
-    auditLog.append({
-      session_id: orderId,
-      actor: Actor.BUYER_AGENT,
-      event_type: EventType.AGENT_REASONING,
-      payload: { step: 'search_catalog', note: `Searching the catalog for "${itemName}".` },
-    });
-
-    // Issue the buyer's IntentMandate for this purchase on the shared chain, so the
-    // dashboard Inspector shows a real, self-consistent mandate + budget cap in the
-    // default (keyless) Stub demo. max_paise is the very ceiling the stub enforces
-    // below (`total > budgetRupees`), so the escalation and the shown cap agree.
-    const now = Date.now();
-    auditLog.append({
-      session_id: orderId,
-      actor: Actor.BUYER_AGENT,
-      event_type: EventType.MANDATE_ISSUED,
-      payload: {
-        mandate: {
-          mandate_type: 'IntentMandate',
-          intent_id: crypto.randomUUID(),
-          max_paise: budgetRupees * 100,
-          allowed_categories: ['electronics', 'groceries', 'subscriptions'],
-          created_at: new Date(now).toISOString(),
-          expiry_timestamp: new Date(now + 30 * 60 * 1000).toISOString(),
-        },
-      },
-    });
-
-    // Step 2 — the agent "builds the cart". Emitted after the mandate so the
-    // terminal reads reason → search → mandate → cart → settle, like a real run.
-    auditLog.append({
-      session_id: orderId,
-      actor: Actor.BUYER_AGENT,
-      event_type: EventType.AGENT_REASONING,
-      payload: { step: 'create_cart', subtotal, tax, total },
-    });
-
-    const block = escalated
-      ? auditLog.append({
-          session_id: orderId,
-          actor: Actor.GUARDRAIL,
-          event_type: EventType.GUARDRAIL_DECISION,
-          payload: { decision: 'ESCALATE_TO_HUMAN', reason: 'amount_over_auto_approve', order_id: orderId, amount_rupees: total, threshold_rupees: budgetRupees },
-        })
-      : auditLog.append({
-          session_id: orderId,
-          actor: Actor.MERCHANT_SERVER,
-          event_type: EventType.MONEY_ACTION,
-          payload: { order_id: orderId, status: 'confirmed', currency: 'INR', amount_rupees: total, items: [{ name: itemName, price: subtotal }] },
-        });
-
-    return res.json([
-      {
-        role: 'agent',
-        content: escalated ? `That comes to ₹${total.toLocaleString('en-IN')}, above your ₹${budgetRupees.toLocaleString('en-IN')} budget — I've held it for your sign-off.` : "Found a good match and placed the order — receipt below.",
-        timestamp: Date.now(),
-      },
-      {
-        role: 'receipt',
-        timestamp: Date.now(),
-        data: { status, merchantName: 'Marketplace via AP2', orderId, items: [{ name: itemName, price: subtotal }], subtotal, tax, total, refId: block.hash, timestamp: Date.now() },
-      },
-    ]);
+    return res.json([{
+      role: 'agent',
+      content: PURCHASE_INTENT_RE.test(text)
+        ? 'Purchase simulation is disabled. Select a live provider and complete the signed delegation flow; no order, payment, receipt, or money audit event was created.'
+        : 'Safe preview mode is active. Select a live provider to search the catalog or begin an authorized checkout.',
+      timestamp: Date.now(),
+    }]);
   }
 
   // Live LLM Path — pull the ESM AI SDK in now (first use), not at boot.
@@ -542,10 +483,9 @@ app.post('/chat', async (req, res) => {
     const taxAmt = Math.round(amt * 0.18);
     const subAmt = amt - taxAmt;
 
-    // Status from the authoritative source: a real order id means the checkout
-    // settled; a payment link (or a yield) means it awaits the buyer's approval;
-    // a budget-exceeded cart is likewise held.
-    let status = 'confirmed';
+    // A Razorpay order/payment link is a pending collection artifact, not a
+    // settled payment. Only a verified webhook may represent PAID state.
+    let status = 'pending_payment';
     if (checkoutOutput) {
       if (checkoutOutput.order_id || checkoutOutput.razorpay_order_id) status = 'confirmed';
       else if (checkoutOutput.payment_link_url || checkoutOutput.state === 'yield_to_human') status = 'pending_approval';

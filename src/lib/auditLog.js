@@ -13,14 +13,15 @@
  * canonicalizer in jcs-hmac.js — the same one the mandate signatures use — so the
  * audit hash and the mandate signatures agree on byte-exact serialization.
  *
- * The store is in-memory (single-writer, demo scale), matching the checkout
- * session store and idempotency store; it is swappable for a durable log later.
- * This is tamper-*evident*, not tamper-*proof*: a single writer needs no
- * consensus, and verifyChain() is what proves the log was not doctored.
+ * The running merchant uses a SQLite-backed append-only chain; the in-memory
+ * factory below exists only for isolated unit tests. This is tamper-*evident*,
+ * not tamper-*proof*: a database administrator can rewrite history unless the
+ * deployment exports signed checkpoints to an independent retention system.
  */
 
 const crypto = require('crypto');
 const { canonicalize } = require('../../jcs-hmac');
+const db = require('../db');
 
 /** Genesis link: the prev_hash of the very first entry. */
 const GENESIS_PREV_HASH = '0'.repeat(64);
@@ -123,6 +124,55 @@ function createAuditLog() {
 }
 
 /**
+ * Database-backed variant used by the running merchant. The public factory
+ * above stays isolated for unit tests; production evidence is never held in a
+ * process-local array. Sequence allocation and append occur in one SQLite
+ * transaction, preserving a single tamper-evident chain across restarts.
+ */
+function createPersistentAuditLog() {
+  const append = db.transaction((partial = {}) => {
+    const last = db.prepare('SELECT seq, entry_json FROM audit_events ORDER BY seq DESC LIMIT 1').get();
+    const previous = last ? JSON.parse(last.entry_json) : null;
+    const entry = {
+      seq: last ? last.seq + 1 : 0,
+      entry_id: partial.entry_id || `log_${crypto.randomBytes(8).toString('hex')}`,
+      timestamp: partial.timestamp || new Date().toISOString(),
+      session_id: partial.session_id === undefined ? null : partial.session_id,
+      actor: partial.actor || Actor.MERCHANT_SERVER,
+      event_type: partial.event_type,
+      payload: partial.payload === undefined ? {} : partial.payload,
+      prev_hash: previous ? previous.hash : GENESIS_PREV_HASH,
+    };
+    entry.hash = computeHash(entry);
+    db.prepare('INSERT INTO audit_events (seq, entry_json, created_at) VALUES (?, ?, ?)')
+      .run(entry.seq, JSON.stringify(entry), entry.timestamp);
+    return entry;
+  });
+
+  function entries() {
+    return db.prepare('SELECT entry_json FROM audit_events ORDER BY seq').all().map((row) => JSON.parse(row.entry_json));
+  }
+
+  function verifyChain() {
+    let expectedPrev = GENESIS_PREV_HASH;
+    for (const entry of entries()) {
+      if (entry.prev_hash !== expectedPrev) return { valid: false, brokenAt: entry.seq };
+      const { hash, ...rest } = entry;
+      if (computeHash(rest) !== hash) return { valid: false, brokenAt: entry.seq };
+      expectedPrev = entry.hash;
+    }
+    return { valid: true, brokenAt: null };
+  }
+
+  return {
+    append,
+    entries,
+    verifyChain,
+    reset: () => db.exec('DELETE FROM audit_events;'),
+  };
+}
+
+/**
  * The one server-wide audit chain (ADR-005). Created once at module load —
  * i.e. when the server process starts — and immediately seeded with an
  * explicit GENESIS block so index 0 is always the chain's anchor rather than
@@ -130,22 +180,22 @@ function createAuditLog() {
  * money actions) and, in a single-process deployment, the MCP tool taps all
  * append to THIS instance; `GET /audit-log` serves it.
  *
- * In-memory and single-writer, matching the checkout session + idempotency
- * stores. Note the process boundary: the MCP stdio server (src/mcp/server.js)
- * runs as a separate process from the merchant HTTP server, so its tool taps
- * only land in this shared chain when the two run in one process (as they do
- * in-process during tests, and can in a combined demo host). Swappable for a
- * durable/shared store later without touching any call site.
+ * Durable in SQLite for the single-node deployment. Note the process boundary:
+ * the MCP stdio server (src/mcp/server.js) must call the HTTP merchant surface
+ * for its audit events to be visible to the web process.
  */
-const sharedAuditLog = createAuditLog();
-sharedAuditLog.append({
-  actor: Actor.MERCHANT_SERVER,
-  event_type: EventType.GENESIS,
-  payload: { note: 'audit chain genesis — server boot' },
-});
+const sharedAuditLog = createPersistentAuditLog();
+if (sharedAuditLog.entries().length === 0) {
+  sharedAuditLog.append({
+    actor: Actor.MERCHANT_SERVER,
+    event_type: EventType.GENESIS,
+    payload: { note: 'audit chain genesis — durable merchant audit chain' },
+  });
+}
 
 module.exports = {
   createAuditLog,
+  createPersistentAuditLog,
   sharedAuditLog,
   computeHash,
   GENESIS_PREV_HASH,

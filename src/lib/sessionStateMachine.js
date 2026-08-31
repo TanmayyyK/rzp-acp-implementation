@@ -33,7 +33,7 @@ const TERMINAL_STATES = Object.freeze(
  * is a deliberate decision, not an accident of a wildcard rule.
  */
 const ALLOWED_TRANSITIONS = Object.freeze({
-  [STATES.CREATED]: Object.freeze([STATES.CONFIRMED, STATES.CANCELLED, STATES.EXPIRED]),
+  [STATES.CREATED]: Object.freeze([STATES.CONFIRMED, STATES.CANCELLED, STATES.EXPIRED, STATES.FAILED]),
   [STATES.CONFIRMED]: Object.freeze([
     STATES.PAID,
     STATES.CANCELLED,

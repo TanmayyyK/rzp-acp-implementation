@@ -240,7 +240,7 @@
       function statusOf(e) {
         var p = e.payload || {};
         if (e.event_type === 'FAILURE') return { text: 'failed', tone: 'broken', icon: 'alert' };
-        if (e.event_type === 'MONEY_ACTION') return { text: 'settled', tone: 'trust', icon: 'shieldCheck' };
+        if (e.event_type === 'MONEY_ACTION') return { text: 'payment requested', tone: 'trust', icon: 'shieldCheck' };
         if (e.event_type === 'WEBHOOK_RECEIVED') {
           var ev = String(p.event || '');
           if (/fail|declin/i.test(ev)) return { text: 'declined', tone: 'broken', icon: 'alert' };

@@ -261,50 +261,18 @@ describe('Attack 3: authorization boundary', () => {
   });
 });
 
-// ─── Attack 4: x402 forged payer proof ──────────────────────────────────────
-describe('Attack 4: x402 forged payer proof', () => {
-  test('a malformed payer signature is refused on shape and the block audited', async () => {
+// ─── Attack 4: x402 independent settlement ingress ─────────────────────────
+describe('Attack 4: x402 independent settlement ingress', () => {
+  test('is retired even for an authenticated caller with a plausible proof', async () => {
     const cookie = await loginAsHuman();
-    const priorLength = sharedAuditLog.entries().length;
-
+    const before = sharedAuditLog.entries().length;
     const res = await inject(app, {
-      method: 'POST',
-      url: '/x402/submit',
-      headers: { Cookie: cookie },
-      body: {
-        amount: 1000,
-        nonce: `nonce-malformed-${crypto.randomBytes(4).toString('hex')}`,
-        signature: 'not-a-jws', // no detached "header..signature" form
-      },
+      method: 'POST', url: '/x402/submit', headers: { Cookie: cookie },
+      body: { amount: 1000, nonce: `nonce-${crypto.randomBytes(4).toString('hex')}`, signature: 'plausible-but-irrelevant' },
     });
-
-    expect(res.status).toBe(400);
-    const blocked = sharedAuditLog.entries().slice(priorLength).find(
-      (e) => e.payload && e.payload.check === 'protocol_signature' && e.payload.outcome === 'BLOCK'
-    );
-    expect(blocked).toBeDefined();
-  });
-
-  test('a well-formed but meaningless payer proof buys no authority', async () => {
-    const cookie = await loginAsHuman();
-    // The merchant does not verify the x402 rail's proof — so the proof must not
-    // be what gates the money. Under partial delegation the human still has to
-    // sign, and a JWS-shaped blob is not a human.
-    db.prepare("UPDATE users SET delegation_mode = 'partial' WHERE principal_id = ?").run(PRINCIPAL);
-
-    const res = await inject(app, {
-      method: 'POST',
-      url: '/x402/submit',
-      headers: { Cookie: cookie },
-      body: {
-        amount: 1000,
-        nonce: `nonce-forged-${crypto.randomBytes(4).toString('hex')}`,
-        signature: `eyJhbGciOiJFZERTQSJ9..${crypto.randomBytes(32).toString('base64url')}`,
-      },
-    });
-
-    expect(res.status).toBe(402);
-    expect(res.body.error).toBe('APPROVAL_MANDATE_REQUIRED');
+    expect(res.status).toBe(410);
+    expect(res.body.error).toBe('X402_MONEY_INGRESS_RETIRED');
+    expect(sharedAuditLog.entries().slice(before).some((entry) => entry.event_type === 'MONEY_ACTION')).toBe(false);
   });
 });
 
@@ -411,7 +379,7 @@ describe('Attack 6: concurrent velocity burst', () => {
 
 // ─── Attack 7: x402 test-principal backdoor ─────────────────────────────────
 describe('Attack 7: x402 test-principal backdoor', () => {
-  test('X-Test-Principal-Id grants nothing — the request is still unauthenticated', async () => {
+  test('X-Test-Principal-Id cannot revive a retired payment writer', async () => {
     const res = await inject(app, {
       method: 'POST',
       url: '/x402/submit',
@@ -422,7 +390,8 @@ describe('Attack 7: x402 test-principal backdoor', () => {
         signature: `eyJhbGciOiJFZERTQSJ9..${crypto.randomBytes(32).toString('base64url')}`,
       },
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(410);
+    expect(res.body.error).toBe('X402_MONEY_INGRESS_RETIRED');
   });
 });
 

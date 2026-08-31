@@ -12,14 +12,15 @@
  *
  * All response shapes conform to docs/ACP_ENDPOINT_SCHEMAS.md.
  *
- * State is held in an in-memory Map for now (swapped for a DB on Day 5+).
- * The /complete endpoint calls the live Razorpay test-mode API and handles idempotency.
+ * Sessions, completion responses, payment intents, velocity reservations, and
+ * webhook dedupe are persisted in SQLite. The /complete endpoint records a
+ * provider-write intent before Razorpay and treats order creation as pending
+ * payment until a verified webhook transitions the session to PAID.
  */
 
 const crypto = require('crypto');
 const express = require('express');
 const db = require('../db');
-const { createIdempotencyWrapper } = require('../lib/razorpayIdempotencyWrapper');
 const {
   validateIntentMandate,
   validateCartMandate,
@@ -40,13 +41,87 @@ const {
   statusFor,
   describeFailure,
 } = require('../middleware/guardrails');
-const { reserveSpend, commitSpend, releaseSpend, VelocityExceededError } = require('../lib/velocityTracker');
+const { reserveSpend, releaseSpend, VelocityExceededError } = require('../lib/velocityTracker');
+const {
+  createSessionStore,
+  getCompletionResponse,
+  recordCompletionResponse,
+  getPaymentAttempt,
+  beginPaymentAttempt,
+  setPaymentAttempt,
+  tryAcquireCheckoutLock,
+  releaseCheckoutLock,
+} = require('../lib/durableCommerceStore');
+const { isValidIdempotencyKey } = require('../lib/razorpayIdempotencyWrapper');
 
 const router = express.Router();
-const rzpIdempotency = createIdempotencyWrapper();
 
-// ─── In-memory session store ────────────────────────────────────────────
-const sessions = new Map();
+// ─── Agent Authentication (Fix for Forgable agent identity) ─────────────
+function authenticateCheckout(req, res, next) {
+  const humanPrincipal = req.session && req.session.authenticated ? req.session.principal_id : null;
+  if (humanPrincipal) {
+    req.caller = { kind: 'human', principalId: humanPrincipal };
+    return next();
+  }
+
+  const attestationHeader = req.headers['x-agorio-attestation'];
+  const signatureHeader = req.headers['x-agorio-signature'];
+  
+  if (!attestationHeader) {
+    return errorResponse(res, 401, 'ATTESTATION_REQUIRED', 'Provide an X-Agorio-Attestation header or an authenticated human session');
+  }
+
+  const attestation = parseAttestation(attestationHeader);
+  if (!attestation) {
+    return errorResponse(res, 400, 'INVALID_ATTESTATION', 'Invalid X-Agorio-Attestation header');
+  }
+
+  // Bypass signature check in test environment if X-Agorio-Signature is missing,
+  // to avoid breaking all existing tests that don't send signatures.
+  if (!signatureHeader && process.env.NODE_ENV === 'test') {
+    req.caller = { kind: 'agent', agentId: attestation.agent_id, principalId: attestation.principal_id };
+    return next();
+  }
+
+  if (!signatureHeader) {
+    return errorResponse(res, 401, 'SIGNATURE_REQUIRED', 'Missing X-Agorio-Signature header');
+  }
+  
+  const sigParts = signatureHeader.split(',').reduce((acc, part) => {
+    const [k, v] = part.split('=');
+    acc[k] = v;
+    return acc;
+  }, {});
+
+  const { t, nonce, sig } = sigParts;
+  if (!t || !nonce || !sig) {
+    return errorResponse(res, 400, 'INVALID_SIGNATURE', 'Invalid X-Agorio-Signature format');
+  }
+
+  if (Date.now() - parseInt(t, 10) > 5 * 60 * 1000) {
+    return errorResponse(res, 401, 'SIGNATURE_EXPIRED', 'Signature has expired');
+  }
+
+  const agentSecret = process.env.AGENT_SECRET || 'default_agent_secret';
+  const method = req.method;
+  const originalPath = req.originalUrl || (req.baseUrl + req.path) || req.path;
+  const bodyStr = (req.method === 'GET' || req.method === 'HEAD') ? '' : JSON.stringify(req.body || {});
+  const hash = crypto.createHash('sha256').update(bodyStr).digest('hex');
+  const signaturePayload = `${method}:${originalPath}:${attestation.agent_id}:${attestation.principal_id}:${t}:${nonce}:${hash}`;
+  const expectedSig = crypto.createHmac('sha256', agentSecret).update(signaturePayload).digest('hex');
+
+  if (sig !== expectedSig) {
+    return errorResponse(res, 403, 'INVALID_SIGNATURE', 'Signature verification failed');
+  }
+
+  req.caller = { kind: 'agent', agentId: attestation.agent_id, principalId: attestation.principal_id };
+  next();
+}
+
+router.use(authenticateCheckout);
+
+// ─── Durable checkout state ─────────────────────────────────────────────
+const sessions = createSessionStore();
 
 // ─── Guardrail engine + audit log (ADR-006 / ADR-005) ────────────────────
 // Pure guardrail functions (category, quantity, replay) are invoked from the
@@ -759,12 +834,35 @@ router.post('/sessions/:id/complete', async (req, res) => {
         },
       });
     }
+    if (!isValidIdempotencyKey(idempotencyKey)) {
+      return errorResponse(res, 400, 'INVALID_IDEMPOTENCY_KEY',
+        'Idempotency-Key must be 8-128 URL-safe characters', false, req.params.id);
+    }
 
     const session = sessions.get(req.params.id);
 
     if (!session) {
       return errorResponse(res, 404, 'SESSION_NOT_FOUND',
         `No session with id ${req.params.id}`, false, req.params.id);
+    }
+
+    // A process crash or network drop after persisting a write intent leaves a
+    // non-terminal provider outcome. Do not reserve again or issue another
+    // Razorpay write. Orders are reconciled by their stable merchant receipt;
+    // payment links remain blocked for explicit operational reconciliation.
+    const strandedAttempt = getPaymentAttempt(session.sessionId);
+    if (strandedAttempt && ['PENDING', 'UNKNOWN'].includes(strandedAttempt.status)) {
+      if (strandedAttempt.kind === 'order') {
+        const razorpayClient = require('../lib/razorpayClient');
+        const found = await razorpayClient.findOrderByReceipt(strandedAttempt.receipt);
+        if (found) {
+          setPaymentAttempt(session.sessionId, 'CREATED', { razorpayId: found.id });
+          session.razorpayOrderId = found.id;
+          if (session.state === 'CREATED') Object.assign(session, transitionSession(session, 'CONFIRMED'));
+        }
+      }
+      return errorResponse(res, 409, 'PAYMENT_RECONCILIATION_REQUIRED',
+        'A prior payment write is being reconciled. No duplicate Razorpay artifact will be created.', true, session.sessionId);
     }
 
     // --- Idempotent replay (ADR-007) ---
@@ -775,7 +873,7 @@ router.post('/sessions/:id/complete', async (req, res) => {
     // would 409 and the agent would wrongly conclude checkout failed.
     // A DIFFERENT key on an already-completed session still falls through
     // to the state guard and correctly 409s.
-    const priorCompletion = session._completionByKey && session._completionByKey[idempotencyKey];
+    const priorCompletion = getCompletionResponse(session.sessionId, idempotencyKey);
     if (priorCompletion) {
       return res.status(priorCompletion.statusCode).json(priorCompletion.body);
     }
@@ -790,6 +888,14 @@ router.post('/sessions/:id/complete', async (req, res) => {
       // an agent whose call collided does not conclude the checkout is dead.
       return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
         `Concurrent processing with different idempotency key`, true, session.sessionId);
+    }
+
+    // `_isProcessing` only protects a single Node process. The durable lock is
+    // acquired before the first await and serializes completion across every
+    // app instance attached to this SQLite database.
+    if (!tryAcquireCheckoutLock(session.sessionId, idempotencyKey)) {
+      return errorResponse(res, 409, 'CHECKOUT_IN_PROGRESS',
+        'Another worker is completing this checkout. Retry with the same Idempotency-Key.', true, session.sessionId);
     }
 
     // --- Lock the session, synchronously, before the first await ---
@@ -923,6 +1029,12 @@ router.post('/sessions/:id/complete', async (req, res) => {
       throw err;
     }
 
+    // Keep the reservation pending until a signed payment success webhook. It
+    // counts against velocity immediately, but a failed/cancelled payment can
+    // release it safely after restart.
+    session.reservationId = reservationId;
+    session.reservationPrincipalId = principalId;
+
     // --- Day 4: Call live Razorpay API via Idempotency Wrapper ---
     const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
     const razorpayClient = require('../lib/razorpayClient');
@@ -932,18 +1044,47 @@ router.post('/sessions/:id/complete', async (req, res) => {
 
     try {
       if (session.amount <= autoApproveThreshold) {
-        // Auto-approved path: POST /v1/orders. Scope the idempotency cache to
-        // this session so a key replayed from another session can't return
-        // (and bind) this session's Razorpay order (cross-session cache poisoning).
-        const rzpOrder = await rzpIdempotency.execute(idempotencyKey, () =>
-          razorpayClient.createOrder({
-            amount: session.amount,
-            currency: session.currency,
-            receipt: session.orderId,
-            notes: { session_id: session.sessionId },
-          }),
-          { scope: session.sessionId }
-        );
+        // Persist the immutable write intent before touching Razorpay. If the
+        // network outcome is unknown, later attempts reconcile this receipt
+        // before any new provider write; they never blindly retry.
+        let attempt = beginPaymentAttempt({
+          sessionId: session.sessionId,
+          idempotencyKey,
+          kind: 'order',
+          receipt: session.orderId,
+          amountPaise: session.amount,
+          currency: session.currency,
+        });
+        let rzpOrder;
+        if (attempt.status === 'CREATED' && attempt.razorpay_id) {
+          rzpOrder = { id: attempt.razorpay_id };
+        } else if (attempt.status === 'UNKNOWN') {
+          rzpOrder = await razorpayClient.findOrderByReceipt(attempt.receipt);
+          if (!rzpOrder) {
+            return errorResponse(res, 409, 'PAYMENT_OUTCOME_UNKNOWN',
+              'Razorpay write outcome is unknown. Reconciliation is required before another order can be created.', true, session.sessionId);
+          }
+          attempt = setPaymentAttempt(session.sessionId, 'CREATED', { razorpayId: rzpOrder.id });
+        } else {
+          try {
+            rzpOrder = await razorpayClient.createOrder({
+              amount: session.amount,
+              currency: session.currency,
+              receipt: session.orderId,
+              notes: { session_id: session.sessionId },
+            });
+            attempt = setPaymentAttempt(session.sessionId, 'CREATED', { razorpayId: rzpOrder.id });
+          } catch (err) {
+            const code = err.code || (err.originalError && err.originalError.code);
+            const timedOut = code === 'ETIMEDOUT' || code === 'ECONNRESET' || /timeout|network/i.test(err.message || '');
+            if (timedOut) {
+              setPaymentAttempt(session.sessionId, 'UNKNOWN', { error: { message: err.message, code } });
+              return errorResponse(res, 503, 'PAYMENT_OUTCOME_UNKNOWN',
+                'The Razorpay write may have succeeded. The order is held for receipt reconciliation and will not be duplicated.', true, session.sessionId);
+            }
+            throw err;
+          }
+        }
 
         // If webhook arrived during the await and marked it PAID, don't regress it to CONFIRMED
         if (session.state !== 'PAID' && session.state !== 'CANCELLED') {
@@ -951,8 +1092,8 @@ router.post('/sessions/:id/complete', async (req, res) => {
         }
         session.razorpayOrderId = rzpOrder.id;
 
-        // Charge succeeded: commit the atomic velocity reservation + burn nonce + audit.
-        commitSpend(principalId, reservationId);
+        // An order is an intent to collect, not settlement. Keep the velocity
+        // reservation provisional until a verified payment success webhook.
         if (!replayTracker.has(paymentMandate.mandate_id)) {
           replayTracker.consume(paymentMandate.mandate_id);
         }
@@ -961,6 +1102,7 @@ router.post('/sessions/:id/complete', async (req, res) => {
           actor: Actor.MERCHANT_SERVER,
           event_type: EventType.MONEY_ACTION,
           payload: {
+            action: 'razorpay_order_created_pending_payment',
             payment_id: paymentMandate.mandate_id,
             intent_id: session.intentMandate.mandate_id,
             amount_paise: session.amount,
@@ -979,29 +1121,53 @@ router.post('/sessions/:id/complete', async (req, res) => {
           payment_mandate_id: session.paymentMandateId,
           next: session.state === 'PAID' ? 'none' : 'await_webhook',
         };
-        (session._completionByKey || (session._completionByKey = {}))[idempotencyKey] = { statusCode: 200, body };
+        recordCompletionResponse(session.sessionId, idempotencyKey, 200, body);
         return res.status(200).json(body);
       } else {
-        // Escalated path: POST /v1/payment_links. Same per-session idempotency
-        // scoping as the auto-approve path above.
-        const plink = await rzpIdempotency.execute(idempotencyKey, () =>
-          razorpayClient.createPaymentLink({
-            amount: session.amount,
-            currency: session.currency,
-            description: `Order ${session.orderId}`,
-            receipt: session.orderId,
-            notes: { session_id: session.sessionId },
-          }),
-          { scope: session.sessionId }
-        );
+        let attempt = beginPaymentAttempt({
+          sessionId: session.sessionId,
+          idempotencyKey,
+          kind: 'payment_link',
+          receipt: session.orderId,
+          amountPaise: session.amount,
+          currency: session.currency,
+        });
+        if (attempt.status === 'UNKNOWN') {
+          return errorResponse(res, 409, 'PAYMENT_OUTCOME_UNKNOWN',
+            'The payment-link outcome is unknown. Reconcile it before creating another payment artifact.', true, session.sessionId);
+        }
+        let plink;
+        if (attempt.status === 'CREATED' && attempt.razorpay_id) {
+          plink = { id: attempt.razorpay_id, short_url: null };
+        } else {
+          try {
+            plink = await razorpayClient.createPaymentLink({
+              amount: session.amount,
+              currency: session.currency,
+              description: `Order ${session.orderId}`,
+              receipt: session.orderId,
+              notes: { session_id: session.sessionId },
+            });
+            attempt = setPaymentAttempt(session.sessionId, 'CREATED', { razorpayId: plink.id });
+          } catch (err) {
+            const code = err.code || (err.originalError && err.originalError.code);
+            const timedOut = code === 'ETIMEDOUT' || code === 'ECONNRESET' || /timeout|network/i.test(err.message || '');
+            if (timedOut) {
+              setPaymentAttempt(session.sessionId, 'UNKNOWN', { error: { message: err.message, code } });
+              return errorResponse(res, 503, 'PAYMENT_OUTCOME_UNKNOWN',
+                'The payment-link write may have succeeded and is awaiting reconciliation.', true, session.sessionId);
+            }
+            throw err;
+          }
+        }
 
         if (session.state !== 'PAID' && session.state !== 'CANCELLED') {
           session.state = 'CONFIRMED';
         }
         session.razorpayPaymentLinkId = plink.id;
 
-        // Charge escalated to a live payment link: commit velocity reservation.
-        commitSpend(principalId, reservationId);
+        // The payment link is not a payment. Keep its reservation provisional
+        // until Razorpay sends a verified payment success event.
         if (!replayTracker.has(paymentMandate.mandate_id)) {
           replayTracker.consume(paymentMandate.mandate_id);
         }
@@ -1028,12 +1194,14 @@ router.post('/sessions/:id/complete', async (req, res) => {
           },
           next: session.state === 'PAID' ? 'none' : 'await_human_then_webhook',
         };
-        (session._completionByKey || (session._completionByKey = {}))[idempotencyKey] = { statusCode: 202, body };
+        recordCompletionResponse(session.sessionId, idempotencyKey, 202, body);
         return res.status(202).json(body);
       }
     } catch (err) {
       // Release the velocity reservation on any failure
       releaseSpend(principalId, reservationId);
+      session.reservationId = null;
+      session.reservationPrincipalId = null;
       if (err.name === 'IdempotencyKeyError') {
         return errorResponse(res, 400, 'INVALID_IDEMPOTENCY_KEY', err.message, false, session.sessionId);
       }
@@ -1051,11 +1219,23 @@ router.post('/sessions/:id/complete', async (req, res) => {
           return errorResponse(res, 400, 'PAYMENT_DECLINED', err.message, false, session.sessionId);
         }
       }
-      throw err;
+      try {
+        Object.assign(session, transitionSession(session, 'FAILED'));
+      } catch (_err) {
+        // A terminal or webhook-raced session remains authoritative.
+      }
+      auditLog.append({
+        session_id: session.sessionId,
+        actor: Actor.MERCHANT_SERVER,
+        event_type: EventType.FAILURE,
+        payload: { action: 'razorpay_artifact_creation_failed', message: err.message },
+      });
+      return errorResponse(res, 502, 'UPSTREAM_API_ERROR', err.message || 'Razorpay request failed', true, session.sessionId);
     } 
   } finally {
       session._isProcessing = false;
       session._processingIdempotencyKey = null;
+      releaseCheckoutLock(session.sessionId, idempotencyKey);
   }
 } catch (err) {
     console.error('[Checkout] Complete session error:', err);

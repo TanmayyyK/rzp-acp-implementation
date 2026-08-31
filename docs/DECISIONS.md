@@ -55,7 +55,7 @@ Format per ADR: **Context** (the forces) → **Decision** → **Consequences** (
 ## ADR-007 — Idempotency on every state-mutating call; async state only from verified webhooks
 **Context.** Networks retry. An LLM may retry. A double-`complete` must never double-charge, and a duplicate webhook must never double-fulfill.
 **Decision.** `POST /complete` requires an `Idempotency-Key`; the first result is stored and replayed verbatim for any repeat. Razorpay calls carry idempotency keys and are wrapped in exponential-backoff retry for 429/5xx. Webhooks are deduplicated on `event.id`. Raw request body is preserved for HMAC-SHA256 verification *before* JSON parsing (already implemented, constant-time compare).
-**Consequences.** (+) Safe under retries, races, and duplicate deliveries — the buyer is never double-charged. (−) Needs a keyed store for idempotency records (in-memory for the demo, swappable for Redis/Postgres).
+**Consequences.** (+) Safe under retries, races, and duplicate deliveries — the buyer is never double-charged. (−) Requires durable idempotency records; this deployment stores them in SQLite and production multi-instance deployments need a shared managed database.
 **Panel defense.** *"Replay the completion call, replay the webhook, hit it during a network retry — one charge, one fulfillment. That's idempotency keys plus webhook dedup doing exactly what they're for."*
 
 ---

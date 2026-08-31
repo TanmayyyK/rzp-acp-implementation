@@ -1,7 +1,13 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const os = require('os');
 
-const dbPath = path.join(__dirname, '../data/products.db');
+// Tests and contract verification must never write audit/payment fixtures into
+// the developer's merchant database. Deployment can explicitly select a
+// managed SQLite volume with DATA_DB_PATH.
+const dbPath = process.env.DATA_DB_PATH || (process.env.NODE_ENV === 'test'
+  ? path.join(os.tmpdir(), `razorpay-commerce-${process.pid}.db`)
+  : path.join(__dirname, '../data/products.db'));
 const db = new Database(dbPath);
 
 // Initialize schema
@@ -67,6 +73,80 @@ db.exec(`
     status TEXT DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Durable commerce state. These tables are deliberately separate from the
+  -- product catalogue so an application restart cannot erase an authorization,
+  -- an in-flight payment, webhook dedupe, or the evidence needed to recover it.
+  CREATE TABLE IF NOT EXISTS checkout_sessions (
+    session_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_checkout_sessions_state ON checkout_sessions(state);
+
+  CREATE TABLE IF NOT EXISTS checkout_responses (
+    session_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, idempotency_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS checkout_locks (
+    session_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL,
+    acquired_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS payment_attempts (
+    session_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    receipt TEXT NOT NULL UNIQUE,
+    amount_paise INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    razorpay_id TEXT,
+    error_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS velocity_ledger (
+    reservation_id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL,
+    amount_paise INTEGER NOT NULL,
+    timestamp_ms INTEGER NOT NULL,
+    provisional INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS idx_velocity_principal_time
+    ON velocity_ledger(principal_id, timestamp_ms);
+
+  CREATE TABLE IF NOT EXISTS webhook_inbox (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    processed_at TEXT,
+    processing_error TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS audit_events (
+    seq INTEGER PRIMARY KEY,
+    entry_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS http_sessions (
+    sid TEXT PRIMARY KEY,
+    session_json TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_http_sessions_expiry ON http_sessions(expires_at);
 `);
 
 // Seed data if empty

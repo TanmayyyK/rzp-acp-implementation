@@ -7,7 +7,7 @@
 
 ## 1. System Architecture Overview
 
-The platform enables autonomous AI buyer agents to discover, negotiate, and settle commercial transactions on behalf of human principals with bounded cryptographic authority and strict liability enforcement.
+The platform enables autonomous AI buyer agents to discover, negotiate, and initiate commercial transactions on behalf of human principals with bounded cryptographic authority and strict liability enforcement. Payment settlement is represented only after a verified Razorpay webhook.
 
 ```mermaid
 flowchart TD
@@ -99,7 +99,7 @@ Exposes the canonical Agentic Commerce Protocol endpoints:
 - `POST /api/v1/checkout/sessions`: Initialize session from `IntentMandate` (`CREATED`).
 - `PATCH /api/v1/checkout/sessions/:id`: Update cart items with re-minted `CartMandate`.
 - `GET /api/v1/checkout/sessions/:id`: Query state, mandates, and Razorpay order references.
-- `POST /api/v1/checkout/sessions/:id/complete`: Enforce idempotency, delegation, velocity, and settle order (`CONFIRMED`).
+- `POST /api/v1/checkout/sessions/:id/complete`: Enforce idempotency, delegation, velocity, persist a payment intent, and create a pending Razorpay artifact (`CONFIRMED`).
 - `POST /api/v1/checkout/sessions/:id/cancel`: Void active session and release allocated resources (`CANCELLED`).
 
 ---

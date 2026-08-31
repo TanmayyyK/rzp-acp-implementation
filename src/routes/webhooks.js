@@ -18,6 +18,8 @@ const { verifyRazorpaySignature } = require('../lib/verifyRazorpaySignature');
 // real transaction event, so record it here — this is what surfaces it in the
 // dashboard Inspector's feed instead of it vanishing into console.log.
 const { sharedAuditLog, EventType, Actor } = require('../lib/auditLog');
+const { claimWebhook, completeWebhook, findSessionByRazorpayReference, setPaymentAttempt } = require('../lib/durableCommerceStore');
+const { commitSpend, releaseSpend } = require('../lib/velocityTracker');
 
 
 const router = express.Router();
@@ -27,6 +29,7 @@ const router = express.Router();
 const processedEventIds = new Set();
 
 router.post('/', (req, res) => {
+  let event;
   try {
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
     const razorpaySignature = req.headers['x-razorpay-signature'];
@@ -56,10 +59,10 @@ router.post('/', (req, res) => {
     }
 
     // Signature valid — parse JSON
-    const event = JSON.parse(rawBody.toString('utf8'));
+    event = JSON.parse(rawBody.toString('utf8'));
 
     // Idempotency — deduplicate on event.id (ADR-007)
-    if (processedEventIds.has(event.id)) {
+    if (!event.id || !claimWebhook(event)) {
       return res.status(200).json({ status: 'already_processed' });
     }
     processedEventIds.add(event.id);
@@ -87,13 +90,26 @@ router.post('/', (req, res) => {
         const orderEntity = event.payload.order.entity;
         const sessionId = orderEntity.notes && orderEntity.notes.session_id;
         
-        const session = sessionId ? sessionsMap.get(sessionId) : null;
+        const session = (sessionId ? sessionsMap.get(sessionId) : null) ||
+          findSessionByRazorpayReference({ orderId: orderEntity.id });
         if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
           if (session.state === 'CREATED') {
             Object.assign(session, transitionSession(session, 'CONFIRMED'));
           }
           Object.assign(session, transitionSession(session, 'PAID'));
           session.razorpayOrderId = orderEntity.id; // Catch up in case the webhook beat the POST /complete response
+          if (session.reservationId) {
+            commitSpend(session.reservationPrincipalId, session.reservationId);
+            session.reservationId = null;
+            session.reservationPrincipalId = null;
+          }
+          setPaymentAttempt(session.sessionId, 'PAID', { razorpayId: orderEntity.id });
+          sharedAuditLog.append({
+            session_id: session.sessionId,
+            actor: Actor.RAZORPAY,
+            event_type: EventType.STATE_TRANSITION,
+            payload: { from: 'CONFIRMED', to: 'PAID', source_event: event.id },
+          });
         } else if (!session) {
           console.warn(`[Webhook] Session not found for order ${orderEntity.id}`);
         }
@@ -103,7 +119,11 @@ router.post('/', (req, res) => {
         const paymentEntity = event.payload.payment.entity;
         const sessionId = paymentEntity.notes && paymentEntity.notes.session_id;
         
-        const session = sessionId ? sessionsMap.get(sessionId) : null;
+        const session = (sessionId ? sessionsMap.get(sessionId) : null) ||
+          findSessionByRazorpayReference({
+            orderId: paymentEntity.order_id,
+            paymentLinkId: paymentEntity.invoice_id,
+          });
         if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
           if (session.state === 'CREATED') {
             Object.assign(session, transitionSession(session, 'CONFIRMED'));
@@ -115,19 +135,63 @@ router.post('/', (req, res) => {
           } else {
             session.razorpayPaymentLinkId = paymentEntity.invoice_id; // Payment links use invoice_id internally
           }
+          if (session.reservationId) {
+            commitSpend(session.reservationPrincipalId, session.reservationId);
+            session.reservationId = null;
+            session.reservationPrincipalId = null;
+          }
+          setPaymentAttempt(session.sessionId, 'PAID', { razorpayId: paymentEntity.order_id || paymentEntity.invoice_id || paymentEntity.id });
+          sharedAuditLog.append({
+            session_id: session.sessionId,
+            actor: Actor.RAZORPAY,
+            event_type: EventType.STATE_TRANSITION,
+            payload: { to: 'PAID', source_event: event.id },
+          });
         } else if (!session) {
           console.warn(`[Webhook] Session not found for payment ${paymentEntity.id}`);
         }
         break;
       }
-      case 'payment.failed':
-        // TODO: Drive state machine → FAILED (Day 12)
+      case 'payment.failed': {
+        const paymentEntity = event.payload && event.payload.payment && event.payload.payment.entity;
+        const sessionId = paymentEntity && paymentEntity.notes && paymentEntity.notes.session_id;
+        const session = (sessionId ? sessionsMap.get(sessionId) : null) ||
+          findSessionByRazorpayReference({
+            orderId: paymentEntity && paymentEntity.order_id,
+            paymentLinkId: paymentEntity && paymentEntity.invoice_id,
+          });
+        if (session && !['PAID', 'COMPLETED', 'CANCELLED', 'FAILED'].includes(session.state)) {
+          const from = session.state;
+          Object.assign(session, transitionSession(session, 'FAILED'));
+          session.failure = {
+            code: paymentEntity.error_code || 'PAYMENT_FAILED',
+            description: paymentEntity.error_description || 'Razorpay reported a failed payment',
+            payment_id: paymentEntity.id || null,
+            event_id: event.id,
+            at: new Date().toISOString(),
+          };
+          if (session.reservationId) {
+            releaseSpend(session.reservationPrincipalId, session.reservationId);
+            session.reservationId = null;
+            session.reservationPrincipalId = null;
+          }
+          setPaymentAttempt(session.sessionId, 'FAILED', { error: session.failure });
+          sharedAuditLog.append({
+            session_id: session.sessionId,
+            actor: Actor.RAZORPAY,
+            event_type: EventType.FAILURE,
+            payload: { from, to: 'FAILED', source_event: event.id, failure: session.failure },
+          });
+        }
         break;
+      }
       default:
     }
 
+    completeWebhook(event.id);
     res.status(200).json({ status: 'success' });
   } catch (error) {
+    if (typeof event !== 'undefined' && event && event.id) completeWebhook(event.id, error.message);
     console.error('Error processing Razorpay webhook:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }

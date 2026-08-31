@@ -163,20 +163,14 @@ describe('velocity (atomic reserve/commit at the money boundary)', () => {
   test('concurrent reservations cannot both pass the cap (TOCTOU)', async () => {
     const first = await reserveSpend('usr_v6', 600, CAP, WINDOW_MS);
 
-    // A second caller arriving while the first is still in flight must NOT be
-    // able to read the pre-reservation ledger: reserveSpend holds a per-principal
-    // mutex from reserve until commit/release, so this stays queued.
-    let outcome = 'pending';
-    const second = reserveSpend('usr_v6', 600, CAP, WINDOW_MS).then(
-      (id) => { outcome = 'granted'; return id; },
-      (err) => { outcome = 'rejected'; throw err; }
-    );
-    await new Promise((resolve) => setImmediate(resolve)); // flush microtasks
-    expect(outcome).toBe('pending');
-
-    // Once the first charge lands, the second sees it — 600+600 > 1000.
-    commitSpend('usr_v6', first);
+    // SQLite serializes the reservation transaction. The second caller sees
+    // the first provisional row immediately; it is rejected rather than being
+    // queued behind a process-local mutex.
+    const second = reserveSpend('usr_v6', 600, CAP, WINDOW_MS);
     await expect(second).rejects.toThrow(VelocityExceededError);
+
+    // The second saw the provisional reservation — 600+600 > 1000.
+    commitSpend('usr_v6', first);
   });
 
   test('a failed check maps to the documented 403 error code', () => {

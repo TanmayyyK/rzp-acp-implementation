@@ -4,7 +4,6 @@ const {
   isValidIdempotencyKey,
   isNetworkError,
   IdempotencyKeyError,
-  RazorpayRequestError,
 } = require('../src/lib/razorpayIdempotencyWrapper');
 
 describe('generateIdempotencyKey', () => {

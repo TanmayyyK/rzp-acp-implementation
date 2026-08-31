@@ -133,7 +133,7 @@
             var clone = Object.assign({}, p.input);
             if (clone.session_id) delete clone.session_id; // hide noise
             argStr = JSON.stringify(clone).replace(/["{}]/g, '').replace(/:/g, ': ').trim();
-          } catch(e) {}
+          } catch (_e) { /* omit unserializable tool input */ }
         }
         if (argStr.length > 60) argStr = argStr.substring(0, 57) + '...';
         return { title: 'Called tool · ' + (p.tool || 'tool'), detail: argStr || moneyStr, tone: p.error ? 'broken' : 'info', icon: 'tool' };
@@ -198,7 +198,7 @@
   }
   function emit() {
     var snap = snapshot();
-    subs.forEach(function (fn) { try { fn(snap); } catch (e) { /* isolate subscribers */ } });
+    subs.forEach(function (fn) { try { fn(snap); } catch (_e) { /* isolate subscribers */ } });
   }
 
   async function poll() {
@@ -209,7 +209,7 @@
       entries = Array.isArray(data.entries) ? data.entries : [];
       integrity = data.integrity || { valid: true, brokenAt: null };
       connected = true;
-    } catch (err) {
+    } catch (_err) {
       // Server unreachable (opened as a static file, or the server is down).
       // Stay honest: report the disconnect and keep the last real entries we
       // already have. Never fabricate a chain.
@@ -230,7 +230,7 @@
       integrity = { valid: !!data.valid, brokenAt: data.brokenAt == null ? null : data.brokenAt };
       connected = true;
       return { valid: integrity.valid, brokenAt: integrity.brokenAt, unavailable: false };
-    } catch (err) {
+    } catch (_err) {
       // Can't reach the server — report that honestly rather than faking a pass.
       connected = false;
       return { valid: null, brokenAt: null, unavailable: true };

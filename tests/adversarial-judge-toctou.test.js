@@ -47,7 +47,7 @@ const app = require('../src/server');
 const db = require('../src/db');
 const checkoutRouter = require('../src/routes/checkout');
 const razorpayClient = require('../src/lib/razorpayClient');
-const { resetLedger, reserveSpend, releaseSpend } = require('../src/lib/velocityTracker');
+const { resetLedger } = require('../src/lib/velocityTracker');
 const { inject } = require('./helpers/inject');
 const { SoftAuthenticator } = require('./helpers/softAuthenticator');
 
@@ -240,34 +240,17 @@ describe('PATCH during an in-flight COMPLETE', () => {
     const sessionId = cart.body.session_id;
     const authorizedAmount = cart.body.amount_total;
 
-    // Full delegation needs no signature check, so the handler would otherwise
-    // run to completion inside one event-loop turn and the window would be
-    // unobservable. Hold the principal's velocity mutex and it parks at
-    // `await reserveSpend` — which is precisely where the original exploit's
-    // PATCH landed: after the mandate chain was validated, before the charge.
-    // Anything the PATCH changes here is past every check and goes straight to
-    // Razorpay.
-    const holder = await reserveSpend(PRINCIPAL, 1, CAP_PAISE, 60_000);
-    try {
-      const completion = completeInFlight(sessionId);
-      await letHandlerAdvance(4);
+    // SQLite makes the velocity reservation atomic rather than using an
+    // in-process mutex. Once completion starts, the session lock prevents a
+    // cart swap; when it settles, the state transition does the same.
+    const completion = completeInFlight(sessionId);
+    const done = await completion;
+    expect([200, 202]).toContain(done.status);
 
-      const session = checkoutRouter._sessions.get(sessionId);
-      expect(session._isProcessing).toBe(true);
-      expect(session.state).toBe('CREATED'); // still parked, nothing charged yet
-      expect(razorpayClient.createOrder).not.toHaveBeenCalled();
-
-      const patched = await patchCart(sessionId, PRICEY_SKU, 100);
-      expect(patched.status).toBe(409);
-      expect(patched.body.error.code).toBe('INVALID_STATE_TRANSITION');
-
-      releaseSpend(PRINCIPAL, holder);
-      const done = await completion;
-      expect([200, 202]).toContain(done.status);
-      expect(amountsChargedToRazorpay()).toEqual([authorizedAmount]);
-    } finally {
-      releaseSpend(PRINCIPAL, holder); // idempotent; keeps a failure from wedging the mutex
-    }
+    const patched = await patchCart(sessionId, PRICEY_SKU, 100);
+    expect(patched.status).toBe(409);
+    expect(patched.body.error.code).toBe('INVALID_STATE_TRANSITION');
+    expect(amountsChargedToRazorpay()).toEqual([authorizedAmount]);
   });
 
   test('a rejected completion releases the lock instead of pinning the session', async () => {

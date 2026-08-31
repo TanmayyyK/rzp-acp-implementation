@@ -318,6 +318,15 @@ function createMerchantTools(options = {}) {
       principal_id: PRINCIPAL_ID
     };
     headers['X-Agorio-Attestation'] = Buffer.from(JSON.stringify(attestation)).toString('base64');
+
+    const agentSecret = process.env.AGENT_SECRET || 'default_agent_secret';
+    const timestamp = Date.now().toString();
+    const nonce = crypto.randomBytes(8).toString('hex');
+    const bodyStr = body !== undefined ? JSON.stringify(body) : '';
+    const hash = crypto.createHash('sha256').update(bodyStr).digest('hex');
+    const signaturePayload = `${method}:${path}:${attestation.agent_id}:${attestation.principal_id}:${timestamp}:${nonce}:${hash}`;
+    const signature = crypto.createHmac('sha256', agentSecret).update(signaturePayload).digest('hex');
+    headers['X-Agorio-Signature'] = `t=${timestamp},nonce=${nonce},sig=${signature}`;
     
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     const init = { method, headers };

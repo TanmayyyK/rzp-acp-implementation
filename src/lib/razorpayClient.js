@@ -7,8 +7,10 @@
  *   - Order creation (POST /v1/orders)
  *   - Payment Link creation (POST /v1/payment_links)
  *
- * All calls carry idempotency keys and are wrapped in exponential backoff
- * for HTTP 429 / 5xx resilience (ADR-007).
+ * Read operations may retry. Payment-creating writes deliberately do not:
+ * after a timeout the provider may have created the artifact, and blindly
+ * retrying a non-idempotent PSP write risks a duplicate charge. The checkout
+ * service persists an intent and reconciles by stable receipt first.
  */
 
 const Razorpay = require('razorpay');
@@ -98,7 +100,7 @@ async function createOrder({ amount, currency = 'INR', receipt, notes = {} }) {
   // Note: The Razorpay Node SDK does not natively support injecting
   // X-Idempotency-Key headers per-request. Therefore, idempotency
   // must be fully managed at the merchant database layer.
-  return withRetry(() => rz.orders.create(orderParams));
+  return rz.orders.create(orderParams);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +132,7 @@ async function createPaymentLink({ amount, currency = 'INR', description, receip
     notes,
   };
 
-  return withRetry(() => rz.paymentLink.create(linkParams));
+  return rz.paymentLink.create(linkParams);
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,14 @@ async function createPaymentLink({ amount, currency = 'INR', description, receip
 async function fetchOrder(razorpayOrderId) {
   const rz = getInstance();
   return withRetry(() => rz.orders.fetch(razorpayOrderId));
+}
+
+/** Find the provider order created for our stable merchant receipt. */
+async function findOrderByReceipt(receipt) {
+  const rz = getInstance();
+  const result = await withRetry(() => rz.orders.all({ receipt, count: 10 }));
+  const items = Array.isArray(result) ? result : (result.items || []);
+  return items.find((item) => item.receipt === receipt) || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +178,7 @@ module.exports = {
   createOrder,
   createPaymentLink,
   fetchOrder,
+  findOrderByReceipt,
   cancelPaymentLink,
   RazorpayRequestError,
   // Exported for testing

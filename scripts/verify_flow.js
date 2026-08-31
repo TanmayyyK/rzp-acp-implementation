@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * End-to-end verifier for the agentic checkout flow (ACP v2.0 + AP2).
+ * Contract verifier for the agentic checkout authorization flow (ACP v2.0 + AP2).
  *
- *     npm run test:e2e
+ *     npm run test:contract
  *
  * ── What this proves ──────────────────────────────────────────────────────
  * Three claims that pull against each other. Any two are easy; the point is
@@ -34,7 +34,8 @@
  * a deterministic stub via the require cache. Every layer under test — WebAuthn
  * verification, grant resolution, mandate chain validation, guardrails, the
  * velocity ledger, idempotency, and the /complete state machine — runs for
- * real. Only the outbound Razorpay HTTP call is faked.
+ * real. Only the outbound Razorpay HTTP call is faked. It is intentionally
+ * not named an end-to-end payment test and cannot evidence settlement.
  */
 
 const path = require('path');
@@ -310,7 +311,7 @@ async function main() {
   assert(complete.body.next === 'await_webhook', 'next step is await_webhook', complete.body.next);
   console.log(`    -> Razorpay order ${rzpOrderId} for ₹${expectedTotal / 100}, no session cookie involved`);
 
-  // ── 6. Idempotency: a retried key replays, it does not re-charge ─────────
+  // ── 6. Idempotency: a retried key replays, it does not recreate the order ─
   newScenario('6 - Retry with the same Idempotency-Key');
   const replay = await agentCompletes(sessionId, {}, key);
   assert(replay.status === 200, 'retry replays 200 (not 409)', replay.body);
@@ -320,7 +321,7 @@ async function main() {
     replay.body
   );
   const differentKey = await agentCompletes(sessionId, {});
-  assert(differentKey.status === 409, 'a different key on a settled session is a 409', differentKey.body);
+  assert(differentKey.status === 409, 'a different key on a pending-payment session is a 409', differentKey.body);
 
   // ── 7. Claim (2): over the cap, only a human signature moves it ──────────
   newScenario('7 - Over-cap purchase needs a human signature (claim 2)');
@@ -340,7 +341,7 @@ async function main() {
   const request = await requestApproval(bigSession, cookie);
   assert(
     request.approval_mandate.approved_amount === bigCart.body.amount_total,
-    'the human is asked for exactly the amount being charged',
+    'the human is asked for exactly the amount to authorize',
     request.approval_mandate
   );
   assert(request.approval_mandate.session_id === bigSession, 'bound to this session', request.approval_mandate.session_id);
@@ -353,7 +354,7 @@ async function main() {
       proof: { type: 'webauthn-assertion', response: attacker.sign(request.webauthn.challenge) },
     },
   });
-  assert(forged.status === 402, "another device's signature does not authorize the charge", forged.body);
+  assert(forged.status === 402, "another device's signature does not authorize the payment request", forged.body);
 
   // The real one.
   const approved = await agentCompletes(bigSession, {
@@ -364,7 +365,7 @@ async function main() {
   });
   assert(approved.status === 202, 'the human signature escalates it to a payment link (202)', approved.body);
   assert(approved.body.state === 'CONFIRMED', 'state -> CONFIRMED', approved.body.state);
-  console.log(`    -> ₹${bigCart.body.amount_total / 100} charged only after a real assertion`);
+  console.log(`    -> ₹${bigCart.body.amount_total / 100} payment link created only after a real assertion`);
 
   // ── 8. Partial delegation: the agent never acts alone ────────────────────
   newScenario('8 - Partial delegation refuses autonomy even far under the cap');
@@ -390,19 +391,19 @@ async function main() {
   assert(audit.status === 200, 'audit log served', audit.status);
   assert(audit.body.integrity.valid === true, 'the hash chain verifies end to end', audit.body.integrity);
   const moneyActions = audit.body.entries.filter((e) => e.event_type === 'MONEY_ACTION');
-  assert(moneyActions.length >= 2, 'every charge left a MONEY_ACTION entry', moneyActions.length);
-  console.log(`    -> ${audit.body.count} entries, chain valid, ${moneyActions.length} money actions`);
+  assert(moneyActions.length >= 2, 'every payment-artifact creation left a MONEY_ACTION entry', moneyActions.length);
+  console.log(`    -> ${audit.body.count} entries, chain valid, ${moneyActions.length} pending-payment actions`);
 
   db.prepare('DELETE FROM delegation_grants WHERE principal_id = ?').run(PRINCIPAL);
   console.log(`\n=== PASSED - ${passed} assertions ===`);
-  console.log('No buyer key and no human key exist in this process. Every charge above');
-  console.log('traces to a WebAuthn assertion produced client-side.\n');
+  console.log('No buyer key and no human key exist in this process. Every payment request above');
+  console.log('traces to a WebAuthn assertion produced client-side; settlement requires a verified webhook.\n');
 }
 
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error('\n=== E2E FLOW FAILED ===');
+    console.error('\n=== CONTRACT FLOW FAILED ===');
     console.error(err.stack || err.message || err);
     process.exit(1);
   });

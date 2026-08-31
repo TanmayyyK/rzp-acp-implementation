@@ -19,13 +19,9 @@
 
 const app = require('../src/server');
 const { sharedAuditLog } = require('../src/lib/auditLog');
-const { sign } = require('../jcs-hmac');
 const { handle } = require('./helpers/mockHttp');
 
-const SECRET =
-  process.env.MCP_MANDATE_SECRET || process.env.RAZORPAY_KEY_SECRET || 'mcp_dummy_secret';
 const ALL_ZERO = '0'.repeat(64);
-const CREATE_PATH = '/api/v1/checkout/sessions';
 
 describe('genesis block (req #1 — chain anchored at server boot)', () => {
   test('seq 0 is a GENESIS block with an all-zero prev_hash and a valid chain', () => {
@@ -59,5 +55,4 @@ describe('GET /audit-log (req #4 — the whole chain for the UI)', () => {
     expect(sharedAuditLog.entries().length).toBe(before);
   });
 });
-
 

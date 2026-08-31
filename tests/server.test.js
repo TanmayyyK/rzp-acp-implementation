@@ -22,6 +22,8 @@ beforeAll(() => {
 });
 
 const app = require('../src/server');
+const checkoutRouter = require('../src/routes/checkout');
+const { reserveSpend, checkVelocity } = require('../src/lib/velocityTracker');
 
 function signBody(body, secret) {
   return crypto.createHmac('sha256', secret).update(body).digest('hex');
@@ -184,20 +186,59 @@ describe('Webhook signature verification', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('already_processed');
   });
+
+  test('payment.failed resolves a persisted checkout and releases its pending velocity reservation', async () => {
+    const sessionId = `acp_sess_webhook_${crypto.randomBytes(5).toString('hex')}`;
+    const orderId = `order_webhook_${crypto.randomBytes(5).toString('hex')}`;
+    const principalId = `usr_webhook_${crypto.randomBytes(5).toString('hex')}`;
+    const reservationId = await reserveSpend(principalId, 100, 100, 60_000);
+    checkoutRouter._sessions.set(sessionId, {
+      sessionId,
+      state: 'CONFIRMED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      razorpayOrderId: orderId,
+      reservationId,
+      reservationPrincipalId: principalId,
+      failure: null,
+    });
+
+    // Deliberately omit notes.session_id: Razorpay payment events can be
+    // correlated through their order id, and that lookup must survive restart.
+    const payload = JSON.stringify({
+      event: 'payment.failed', id: eventId('failed'),
+      payload: { payment: { entity: {
+        id: 'pay_failed_test', order_id: orderId,
+        error_code: 'BAD_REQUEST_ERROR', error_description: 'Insufficient funds',
+      } } },
+    });
+    const res = await post('/api/v1/webhooks/razorpay', {
+      headers: headers(signBody(payload, SECRET)), body: payload,
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = checkoutRouter._sessions.get(sessionId);
+    expect(persisted.state).toBe('FAILED');
+    expect(persisted.failure).toMatchObject({ code: 'BAD_REQUEST_ERROR', payment_id: 'pay_failed_test' });
+    expect(checkVelocity(principalId, 100, 100, 60_000).allowed).toBe(true);
+  });
 });
 
 // ===================== Checkout idempotency =====================
 
 describe('Checkout session lifecycle', () => {
   test('POST /complete without Idempotency-Key -> 400', async () => {
-    const res = await post('/api/v1/checkout/sessions/fake_id/complete', { body: {} });
+    const res = await post('/api/v1/checkout/sessions/fake_id/complete', {
+      headers: { 'X-Agorio-Attestation': 'eyJhZ2VudF9pZCI6InRlc3QiLCJwcmluY2lwYWxfaWQiOiJ0ZXN0In0=' },
+      body: {}
+    });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('IDEMPOTENCY_KEY_MISSING');
   });
 
   test('POST /complete with Idempotency-Key but fake session -> 404', async () => {
     const res = await post('/api/v1/checkout/sessions/fake_id/complete', {
-      headers: { 'Idempotency-Key': 'idem_test_001' },
+      headers: { 'Idempotency-Key': 'idem_fake', 'X-Agorio-Attestation': 'eyJhZ2VudF9pZCI6InRlc3QiLCJwcmluY2lwYWxfaWQiOiJ0ZXN0In0=' },
       body: {},
     });
     expect(res.status).toBe(404);
@@ -205,30 +246,12 @@ describe('Checkout session lifecycle', () => {
   });
 });
 
-// ===================== Orders (validation only, no live Razorpay) =====================
+// ===================== Direct Razorpay ingress is permanently retired =====================
 
-describe('Orders validation', () => {
-  test('POST /api/v1/orders without amount -> 400', async () => {
-    const res = await post('/api/v1/orders', { body: { receipt: 'ord_test_001' } });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_AMOUNT');
-  });
-
-  test('POST /api/v1/orders with float amount -> 400', async () => {
-    const res = await post('/api/v1/orders', { body: { amount: 749.99, receipt: 'ord_test_002' } });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_AMOUNT');
-  });
-
-  test('POST /api/v1/orders without receipt -> 400', async () => {
-    const res = await post('/api/v1/orders', { body: { amount: 749900 } });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('MISSING_RECEIPT');
-  });
-
-  test('POST /api/v1/orders/link without description -> 400', async () => {
-    const res = await post('/api/v1/orders/link', { body: { amount: 749900 } });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('MISSING_DESCRIPTION');
+describe('Orders ingress retirement', () => {
+  test.each(['/api/v1/orders', '/api/v1/orders/link'])('%s -> 410 regardless of caller supplied money fields', async (url) => {
+    const res = await post(url, { body: { amount: 749900, currency: 'USD', receipt: 'arbitrary' } });
+    expect(res.status).toBe(410);
+    expect(res.body.error.code).toBe('DIRECT_RAZORPAY_INGRESS_RETIRED');
   });
 });

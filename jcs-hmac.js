@@ -219,7 +219,7 @@ function verify(payload, signature, secret, options = {}) {
     const canonical = canonicalize(payload);
     expected = crypto.createHmac(HMAC_ALGORITHM, secret).update(canonical, 'utf8').digest();
     actual = Buffer.from(signature, encoding);
-  } catch (err) {
+  } catch (_err) {
     // Malformed payload or malformed signature encoding -> not valid.
     return false;
   }

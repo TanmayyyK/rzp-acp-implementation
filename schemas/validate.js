@@ -14,7 +14,6 @@ function fail(errors) {
 // Primitive format helpers
 // ---------------------------------------------------------------------------
 const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-const CATEGORY_SLUG_RE = /^[a-z][a-z0-9_]{1,63}$/;
 
 function isPlainObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 function isString(v) { return typeof v === 'string'; }
@@ -174,10 +173,6 @@ function validatePaymentMandate(input) {
 // ---------------------------------------------------------------------------
 // ApprovalMandate Validator
 // ---------------------------------------------------------------------------
-const APPROVAL_CLAIMS = new Set([
-  'session_id', 'principal_id', 'approved_amount', 'issued_at'
-]);
-
 function validateApprovalMandate(input) {
   const errors = [];
   if (!isPlainObject(input)) return fail(['(root) must be an object']);
@@ -205,7 +200,7 @@ function checkCartArithmetic(cart) {
   const errors = [];
   let computedTotal = 0;
 
-  cart.claims.line_items.forEach((item, i) => {
+  cart.claims.line_items.forEach((item) => {
     computedTotal += item.quantity * item.unit_price;
   });
 

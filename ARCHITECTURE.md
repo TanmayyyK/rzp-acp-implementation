@@ -92,7 +92,7 @@ Enables zero-friction HTTP 402 Payment Required handshakes for Web3 and autonomo
 Implements the 3-tier W3C Verifiable Credential mandate chain:
 1. **`IntentMandate`**: Signed by the human buyer (or delegated agent with WebAuthn credentials), defining natural language intent, maximum allowable spend, allowed categories, and time bounds.
 2. **`CartMandate`**: Signed by the merchant server, locking concrete line items, unit prices, tax, and total price for an execution window.
-3. **`PaymentMandate`**: Signed by the merchant processor-of-record, binding the cart to a concrete Razorpay order with execution authority (`agent` auto-capture or `human` approval link).
+3. **`PaymentMandate`**: Signed by the merchant processor-of-record, binding the cart to a concrete Razorpay order with execution authority (`agent` order orchestration or `human` approval link).
 
 ### 3.3 ACP 5-Stage REST Interface (`src/routes/checkout.js`)
 Exposes the canonical Agentic Commerce Protocol endpoints:

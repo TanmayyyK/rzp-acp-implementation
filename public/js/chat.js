@@ -80,7 +80,7 @@
       var hero = el('div', 'hero');
       
       hero.appendChild(el('h1', 'hero-title', { text: 'What would you like to buy today?' }));
-      hero.appendChild(el('p', 'hero-sub', { text: 'Your buyer agent searches, checks it against your budget mandate, and settles on Razorpay rails — every step written to a tamper-evident audit chain.' }));
+      hero.appendChild(el('p', 'hero-sub', { text: 'Your buyer agent searches and checks signed authority before creating a Razorpay payment request. It is marked paid only after a verified webhook.' }));
       var chips = el('div', 'hero-chips');
       EXAMPLES.forEach(function (ex) {
         var chip = el('button', 'hero-chip', { type: 'button', text: ex });
@@ -178,7 +178,7 @@
       box.appendChild(input);
       box.appendChild(tools);
       form.appendChild(box);
-      form.appendChild(el('p', 'composer-hint', { html: 'Amounts stay under your budget mandate · settled on Razorpay test rails' }));
+      form.appendChild(el('p', 'composer-hint', { html: 'Amounts stay under signed authority · payment remains pending until Razorpay confirms it' }));
 
       region.appendChild(scroll);
       region.appendChild(form);
@@ -389,7 +389,7 @@
             var delta = decoder.decode(chunk.value, { stream: true });
             if (delta) appendNarration(ref, delta);
           }
-        } catch (e) { /* aborted on finalize, or offline — keep whatever streamed */ }
+        } catch (_e) { /* aborted on finalize, or offline — keep whatever streamed */ }
       }
 
       // Mirror this turn's real audit events into the thinking disclosure as a
@@ -479,7 +479,7 @@
           if (!res.ok) throw new Error('chat HTTP ' + res.status);
           messages = await res.json();
           await S.refresh(); // pull the blocks the server just appended (Trust drawer)
-        } catch (err) {
+        } catch (_err) {
           // Server unreachable: fail honestly — never fabricate a receipt.
           messages = offlineNotice();
           if (window.UI) window.UI.toast('Start the agent with `npm start`, then try again.', { tone: 'error', title: "Can't reach the agent" });
@@ -489,7 +489,7 @@
         // the reasoning always stays temporally ahead of the answer, never trailing
         // it (the "time-correlation" the whole live view exists to preserve).
         if (thinkAbort) thinkAbort.abort();
-        try { await thinkingStream; } catch (e) { /* aborted */ }
+        try { await thinkingStream; } catch (_e) { /* aborted */ }
         renderThinkingSteps(thinking, startSeq);
         finalizeThinking(thinking);
 
