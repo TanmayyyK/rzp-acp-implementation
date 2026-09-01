@@ -9,7 +9,7 @@ const router = express.Router();
 // Helper to get or set a dummy user. In a real app, this would be tied to an authenticated session for registration.
 // For demonstration, we'll accept a principal_id from the query or body, or default to 'usr_alice'.
 function getCircleUser(req) {
-  const id = req.query.principal_id || req.body.principal_id || 'usr_alice';
+  const id = (req.query && req.query.principal_id) || (req.body && req.body.principal_id) || (req.session && req.session.principal_id) || 'usr_alice';
   return {
     id,
     username: id,
@@ -38,6 +38,9 @@ router.get('/register/generate', async (req, res) => {
 
     res.json(options);
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     console.error('generateRegOptions error:', err);
     res.status(500).json({ error: err.message });
   }
@@ -59,23 +62,27 @@ router.post('/register/verify', async (req, res) => {
     if (verification.verified && verification.authenticator) {
       const { credentialID, credentialPublicKey, counter, transports } = verification.authenticator;
       
-      try {
-        db.prepare(`
-          INSERT INTO webauthn_credentials (principal_id, credential_id, public_key, counter, transports)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(
-          principal_id,
-          credentialID,
-          credentialPublicKey,
-          counter,
-          transports ? JSON.stringify(transports) : null
-        );
-      } catch (err) {
-        if (err.code && err.code.startsWith('SQLITE_CONSTRAINT')) {
-          return res.status(409).json({ error: 'Credential already exists for this principal' });
-        }
-        throw err;
-      }
+      // Idempotent by principal: completing a fresh registration ceremony proves
+      // possession of an authenticator, so a returning principal REBINDS to the
+      // new credential instead of being rejected. Without this, a device whose
+      // passkey is gone (cleared data, a different browser, a new machine) is
+      // locked out — the stale row blocks re-registration AND makes login
+      // advertise (in allowCredentials) a credential the device no longer holds.
+      db.prepare(`
+        INSERT INTO webauthn_credentials (principal_id, credential_id, public_key, counter, transports)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(principal_id) DO UPDATE SET
+          credential_id = excluded.credential_id,
+          public_key = excluded.public_key,
+          counter = excluded.counter,
+          transports = excluded.transports
+      `).run(
+        principal_id,
+        credentialID,
+        credentialPublicKey,
+        counter,
+        transports ? JSON.stringify(transports) : null
+      );
       
       // Clear challenge
       req.session.currentChallenge = null;
@@ -92,7 +99,8 @@ router.post('/register/verify', async (req, res) => {
 // GET /auth/login/generate
 router.get('/login/generate', async (req, res) => {
   try {
-    const user = getCircleUser(req);
+    const id = req.query.principal_id || req.body.principal_id || 'usr_alice';
+    const user = { id, username: id, displayName: id };
     const row = db.prepare('SELECT * FROM webauthn_credentials WHERE principal_id = ?').get(user.id);
     
     if (!row) {
