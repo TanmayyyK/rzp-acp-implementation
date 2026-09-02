@@ -40,6 +40,7 @@ const crypto = require('crypto');
 const app = require('../src/server');
 const db = require('../src/db');
 const checkoutRouter = require('../src/routes/checkout');
+const { signRequest: signAgentRequest } = require('../src/lib/agentSignature');
 const { createMerchantTools } = require('../src/mcp/merchantClient');
 const { createAuditLog, sharedAuditLog } = require('../src/lib/auditLog');
 const { signEdDSA } = require('../src/lib/jcs-eddsa');
@@ -51,21 +52,36 @@ const PRINCIPAL = 'usr_alice';
 const AGENT_ID = 'buyer_agent_1'; // must equal config.agentId — the grant names the agent
 const CAP_PAISE = 50000000; // ₹500,000 account cap for this suite
 
-const CHEAP_SKU = 'prod_elec_007'; // ₹1,900
-const PRICEY_SKU = 'prod_elec_005'; // ₹29,990 — two of these breach the 5,000,000 test cap
+const CHEAP_SKU = 'apple-braided-usb-c-to-usb-c-cable-2m'; // ₹1,900
+const PRICEY_SKU = 'sony-wh-1000xm5-wireless-noise-cancelling-headphones'; // ₹29,990 — two of these breach the 5,000,000 test cap
 const BURST_CAP_PAISE = 5000000;
 
 let authenticator;
 let toolAudit;
 let tools;
 
-/** ADR-008 attestation: who the agent is. Deliberately never what it may spend. */
-function agentHeaders(extra = {}) {
-  const attestation = Buffer.from(
-    JSON.stringify({ agent_id: AGENT_ID, principal_id: PRINCIPAL })
-  ).toString('base64');
+/** ADR-008 attestation and signature: who the agent is and message integrity. */
+function agentHeaders(method = 'GET', url = '/', body = null, extra = {}) {
+  const attestationObj = { agent_id: AGENT_ID, principal_id: PRINCIPAL };
+  const attestation = Buffer.from(JSON.stringify(attestationObj)).toString('base64');
+  
+  // Sign with the agent's Ed25519 private key; the server verifies with the
+  // public half. The signed payload binds method/path/agent/principal/body.
+  const signatureHeader = signAgentRequest({
+    method,
+    path: url,
+    agentId: attestationObj.agent_id,
+    principalId: attestationObj.principal_id,
+    body,
+    privateKey: process.env.AGENT_PRIVATE_KEY,
+  });
+
   // No Cookie. That absence is the whole point of Attack 3.
-  return { 'X-Agorio-Attestation': attestation, ...extra };
+  return { 
+    'X-Agorio-Attestation': attestation,
+    'X-Agorio-Signature': signatureHeader,
+    ...extra 
+  };
 }
 
 /** Drive the real WebAuthn login ceremony; return the session cookie. */
@@ -111,7 +127,7 @@ function agentCreatesCart(grantId, sku, quantity = 1) {
   return inject(app, {
     method: 'POST',
     url: '/api/v1/checkout/sessions',
-    headers: agentHeaders(),
+    headers: agentHeaders('POST', '/api/v1/checkout/sessions', { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] }),
     body: { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] },
   });
 }
@@ -120,7 +136,7 @@ function agentCompletes(sessionId, body = {}) {
   return inject(app, {
     method: 'POST',
     url: `/api/v1/checkout/sessions/${sessionId}/complete`,
-    headers: agentHeaders({ 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
+    headers: agentHeaders('POST', `/api/v1/checkout/sessions/${sessionId}/complete`, body, { 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
     body,
   });
 }
@@ -348,7 +364,7 @@ describe('Attack 5: self-signed ApprovalMandate', () => {
     const res = await inject(app, {
       method: 'GET',
       url: `/api/v1/checkout/sessions/${cart.body.session_id}/approve/challenge`,
-      headers: agentHeaders(),
+      headers: agentHeaders('GET', `/api/v1/checkout/sessions/${cart.body.session_id}/approve/challenge`),
     });
     expect(res.status).toBe(401);
   });

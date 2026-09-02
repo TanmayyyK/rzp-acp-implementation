@@ -24,6 +24,8 @@
  * hand straight to the audit log and map to an HTTP error code.
  */
 
+const db = require('../db');
+
 /**
  * @typedef {Object} GuardrailDecision
  * @property {string} check                    Machine-readable check id.
@@ -37,10 +39,12 @@ const GUARDRAIL_ERROR_CODES = Object.freeze({
   quantity: 'GUARDRAIL_QUANTITY_EXCEEDED', // 403
   replay: 'NONCE_REPLAYED', // 409
   velocity: 'GUARDRAIL_VELOCITY_EXCEEDED', // 403
+  risk_tier: 'YIELD_TO_HUMAN',
 });
 
 /** HTTP status for a failed check. Replay is a conflict; the rest are forbidden. */
 function statusFor(decision) {
+  if (decision.check === 'risk_tier') return 401; // yield to human requires authentication step-up
   return decision.check === 'replay' ? 409 : 403;
 }
 
@@ -82,24 +86,54 @@ function checkCategoryAllowlist(resolvedItems, allowedCategories) {
 /**
  * Every item's requested quantity must be within the product's
  * `max_quantity_per_order` eligibility rule (when the product declares one).
+ * DB enforces this check dynamically.
  * @returns {GuardrailDecision}
  */
 function checkQuantityLimits(resolvedItems) {
-  const offending = (resolvedItems || [])
-    .filter(
-      (it) =>
-        Number.isInteger(it.max_quantity_per_order) &&
-        it.quantity > it.max_quantity_per_order
-    )
-    .map((it) => ({
-      sku: it.sku,
-      quantity: it.quantity,
-      max_quantity_per_order: it.max_quantity_per_order,
-    }));
+  const offending = [];
+  for (const it of (resolvedItems || [])) {
+    let maxQty = it.max_quantity_per_order;
+    if (maxQty === undefined) {
+      const row = db.prepare('SELECT max_quantity_per_order FROM products WHERE sku = ? OR id = ?').get(it.sku, it.sku);
+      if (row) maxQty = row.max_quantity_per_order;
+    }
+    const effectiveMaxQty = maxQty != null ? maxQty : 10;
+    if (it.quantity > effectiveMaxQty) {
+      offending.push({
+        sku: it.sku,
+        quantity: it.quantity,
+        max_quantity_per_order: effectiveMaxQty,
+      });
+    }
+  }
+
   return {
     check: 'quantity',
     outcome: offending.length === 0 ? 'PASS' : 'FAIL',
     detail: { offending_items: offending },
+  };
+}
+
+function checkRiskTier(resolvedItems) {
+  const offending = [];
+  for (const it of (resolvedItems || [])) {
+    let riskTier = it.risk_tier;
+    if (riskTier === undefined) {
+      const row = db.prepare('SELECT risk_tier FROM products WHERE sku = ? OR id = ?').get(it.sku, it.sku);
+      if (row) riskTier = row.risk_tier;
+    }
+    if (riskTier === 'CRITICAL') {
+      offending.push({
+        sku: it.sku,
+        risk_tier: riskTier,
+      });
+    }
+  }
+
+  return {
+    check: 'risk_tier',
+    outcome: offending.length === 0 ? 'PASS' : 'FAIL',
+    detail: { offending_items: offending }
   };
 }
 
@@ -119,6 +153,8 @@ function describeFailure(decision) {
           .map((o) => `${o.sku} (${o.quantity} > ${o.max_quantity_per_order})`)
           .join(', ')
       );
+    case 'risk_tier':
+      return 'critical risk tier detected, yield to human required';
     case 'replay':
       return d.replayed
         ? `payment_id ${d.payment_id} has already been used (replay rejected)`
@@ -170,27 +206,6 @@ function createReplayTracker(initial = []) {
   };
 }
 
-/**
- * Velocity is deliberately NOT a tracker object here.
- *
- * The money boundary needs an atomic check-and-reserve (the TOCTOU fix): a pure
- * `check` that returns a decision, followed later by a `record`, is precisely the
- * race that let M concurrent /complete calls each read spend=0 and all charge. So
- * velocity is owned end-to-end by src/lib/velocityTracker.js
- * (reserveSpend/commitSpend/releaseSpend under a per-principal mutex) and invoked
- * directly by the route, which is the only layer that knows whether the downstream
- * charge succeeded. It is also keyed strictly by principal_id: keying by intent_id
- * would let an agent clear any cap by opening many small intents.
- *
- * A `createVelocityTracker(...)` shim used to be exported here for the old
- * check-then-record shape. Nothing in src/ called it, its `reset` could not clear
- * the shared ledger, and its `check` re-introduced the non-atomic read — so it is
- * gone rather than kept working-ish. Likewise `evaluatePaymentGuardrails`, whose
- * only purpose was to compose that check with the replay check; the route now
- * composes replayTracker.check + reserveSpend, which is the only ordering that can
- * be both audited and atomic.
- */
-
 // ─── Composite evaluators (one per mandate boundary) ─────────────────────────
 
 /**
@@ -202,6 +217,7 @@ function evaluateCartGuardrails({ allowedCategories, resolvedItems }) {
   const decisions = [
     checkCategoryAllowlist(resolvedItems, allowedCategories),
     checkQuantityLimits(resolvedItems),
+    checkRiskTier(resolvedItems)
   ];
   return { decisions, ok: decisions.every((d) => d.outcome === 'PASS') };
 }
@@ -214,6 +230,7 @@ module.exports = {
   describeFailure,
   checkCategoryAllowlist,
   checkQuantityLimits,
+  checkRiskTier,
   createReplayTracker,
   evaluateCartGuardrails,
 };

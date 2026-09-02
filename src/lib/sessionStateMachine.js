@@ -23,7 +23,7 @@ const STATES = Object.freeze({
 });
 
 const TERMINAL_STATES = Object.freeze(
-  new Set([STATES.COMPLETED, STATES.CANCELLED, STATES.FAILED, STATES.EXPIRED])
+  new Set([STATES.COMPLETED, STATES.CANCELLED, STATES.FAILED])
 );
 
 /**
@@ -45,7 +45,9 @@ const ALLOWED_TRANSITIONS = Object.freeze({
   [STATES.COMPLETED]: Object.freeze([]),
   [STATES.CANCELLED]: Object.freeze([]),
   [STATES.FAILED]: Object.freeze([]),
-  [STATES.EXPIRED]: Object.freeze([]),
+  // EXPIRED allows a transition to PAID to handle the race condition where a
+  // webhook for a successful payment arrives just after the expiry sweeper runs.
+  [STATES.EXPIRED]: Object.freeze([STATES.PAID]),
 });
 
 class InvalidStateTransitionError extends Error {

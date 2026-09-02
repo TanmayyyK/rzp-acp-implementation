@@ -458,20 +458,6 @@ button { font: inherit; }
 }
 .composer-input::placeholder { color: var(--text-3); }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.composer-budget {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 6px 10px; border-radius: 10px;
-  background: var(--surface-2); border: 1px solid var(--border);
-  color: var(--text-2); font-size: 13px; font-weight: 600;
-}
-.composer-budget-sym { color: var(--text-3); }
-.composer-budget-input {
-  width: 66px; border: none; outline: none; background: transparent;
-  color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 600;
-  -moz-appearance: textfield;
-}
-.composer-budget-input::-webkit-outer-spin-button,
-.composer-budget-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .composer-model { display: inline-flex; }
 .composer-model-select {
   font-family: inherit; font-size: 13px; font-weight: 600;
@@ -1346,10 +1332,6 @@ body.drawer-open { overflow: hidden; }
       });
       var tools = el('div', 'composer-tools');
 
-      var budgetField = el('label', 'composer-budget', { title: 'Spend cap — becomes the IntentMandate ceiling for a purchase' });
-      budgetField.appendChild(el('span', 'composer-budget-sym', { text: '₹' }));
-      var budgetInput = el('input', 'composer-budget-input', { id: 'budget-input', type: 'number', min: '0', step: '100', value: String(DEFAULT_BUDGET), 'aria-label': 'Budget in rupees' });
-      budgetField.appendChild(budgetInput);
 
       var modelWrap = el('label', 'composer-model');
       var modelSelect = el('select', 'composer-model-select', { id: 'model-select', 'aria-label': 'Model' });
@@ -1363,7 +1345,6 @@ body.drawer-open { overflow: hidden; }
 
       var send = el('button', 'composer-send', { type: 'submit', 'aria-label': 'Send', html: SEND });
 
-      tools.appendChild(budgetField);
       tools.appendChild(modelWrap);
       tools.appendChild(el('span', 'composer-spacer'));
       tools.appendChild(send);
@@ -1383,7 +1364,7 @@ body.drawer-open { overflow: hidden; }
       }
       function setLock(v) {
         locked = v;
-        input.disabled = v; send.disabled = v; modelSelect.disabled = v; budgetInput.disabled = v;
+        input.disabled = v; send.disabled = v; modelSelect.disabled = v; 
         form.classList.toggle('is-locked', v);
         if (!v) { input.focus(); }
       }
@@ -1513,7 +1494,7 @@ body.drawer-open { overflow: hidden; }
         var text = input.value.trim();
         if (!text) return;
         var provider = modelSelect.value;
-        var budget = Number(budgetInput.value) || 0;
+        var budget = 0;
 
         dismissHero();
         addBubble('user', text, Date.now());

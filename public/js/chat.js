@@ -68,11 +68,15 @@
   }
 
   window.ChatPanel = {
-    init: function (region) {
+    init: function (region, initialHistory) {
       if (!region) return;
       mountRegion = region;
       region.innerHTML = '';
       var locked = false;
+
+      var activeModel = 'gemini';
+      var chatHistory = initialHistory || []; // use provided history
+      window.ChatPanel.getHistory = function() { return chatHistory; };
 
       // ── scaffold ───────────────────────────────────────────────────────
       var scroll = el('div', 'chat-scroll', { role: 'log', 'aria-live': 'polite' });
@@ -93,7 +97,14 @@
         chips.appendChild(chip);
       });
       hero.appendChild(chips);
-      scroll.appendChild(hero);
+      if (chatHistory.length === 0) {
+        scroll.appendChild(hero);
+      } else {
+        chatHistory.forEach(function (m) {
+          if (m.role === 'receipt') addReceipt(m.data || m.receipt, m.timestamp);
+          else addBubble(m.role || 'agent', m.content || m.message, m.timestamp);
+        });
+      }
 
       // ── composer ───────────────────────────────────────────────────────
       var form = el('form', 'composer');
@@ -103,10 +114,6 @@
       });
       var tools = el('div', 'composer-tools');
 
-      var budgetField = el('label', 'composer-budget', { title: 'Spend cap — becomes the IntentMandate ceiling for a purchase' });
-      budgetField.appendChild(el('span', 'composer-budget-sym', { text: '₹' }));
-      var budgetInput = el('input', 'composer-budget-input', { id: 'budget-input', type: 'number', min: '0', step: '100', value: String(DEFAULT_BUDGET), 'aria-label': 'Budget in rupees' });
-      budgetField.appendChild(budgetInput);
 
       // ── Custom Model Dropdown ──────────────────────────────────────────
       var modelWrap = el('div', 'model-dropdown-container');
@@ -122,8 +129,7 @@
       var menu = el('div', 'model-dropdown-menu');
       menu.appendChild(el('div', 'model-dropdown-header', { text: 'Model' }));
 
-      var activeModel = 'gemini';
-      var chatHistory = []; // default
+
 
       // Internal model values map to UI labels
       var models = [
@@ -171,7 +177,6 @@
 
       var send = el('button', 'composer-send', { type: 'submit', 'aria-label': 'Send', html: SEND });
 
-      tools.appendChild(budgetField);
       tools.appendChild(modelWrap);
       tools.appendChild(el('span', 'composer-spacer'));
       tools.appendChild(send);
@@ -194,7 +199,7 @@
       function syncSend() { send.disabled = locked || !input.value.trim(); }
       function setLock(v) {
         locked = v;
-        input.disabled = v; modelButton.disabled = v; budgetInput.disabled = v;
+        input.disabled = v; modelButton.disabled = v; 
         form.classList.toggle('is-locked', v);
         scroll.setAttribute('aria-busy', String(v)); // announce work to assistive tech
         syncSend();
@@ -252,6 +257,12 @@
 
       function addReceipt(data, ts) {
         var d = data || {};
+        
+        // Synchronize the new global topbar Cart dropdown with the latest checkout/cart state
+        if (typeof window.updateCartDropdown === 'function') {
+          window.updateCartDropdown(d);
+        }
+
         var row = el('div', 'msg msg-agent');
         var card = el('div', 'receipt');
         card.appendChild(el('div', 'receipt-perf'));
@@ -303,9 +314,9 @@
         scroll.appendChild(row);
         
         if (d.status === 'confirmed' && typeof d.total === 'number') {
-          var currentBudget = Number(budgetInput.value) || 0;
+          var currentBudget = 0;
           var newBudget = Math.max(0, currentBudget - d.total);
-          budgetInput.value = String(newBudget);
+          
         }
 
         // Confirm the outcome with a transient toast (announced, never focus-stealing).
@@ -449,11 +460,12 @@
         var text = input.value.trim();
         if (!text) return;
         var provider = activeModel;
-        var budget = Number(budgetInput.value) || 0;
+        var budget = 0;
 
         dismissHero();
         addBubble('user', text, Date.now());
         chatHistory.push({ role: 'user', content: text });
+        if (typeof window.onChatUpdated === 'function') window.onChatUpdated();
         input.value = '';
         autogrow();
         setLock(true);
@@ -495,6 +507,7 @@
 
         (Array.isArray(messages) ? messages : [messages]).forEach(function (m) {
           if (!m) return;
+          chatHistory.push(m);
           if (m.role === 'receipt') addReceipt(m.data || m.receipt, m.timestamp);
           else addBubble(m.role || 'agent', m.content || m.message, m.timestamp);
         });
@@ -518,3 +531,62 @@
   window.ChatPanel.reset = function () { if (mountRegion) window.ChatPanel.init(mountRegion); };
   window.ChatPanel.focus = function () { var i = document.getElementById('chat-input'); if (i) i.focus(); };
 })();
+
+// ── Cart UI Updates ────────────────────────────────────────────────────────
+(function initCartUI() {
+  var cartBtn = document.getElementById('cart-btn');
+  var cartDropdown = document.getElementById('cart-dropdown');
+  if (cartBtn && cartDropdown) {
+    cartBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      cartDropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', function (e) {
+      if (!cartDropdown.contains(e.target)) {
+        cartDropdown.classList.add('hidden');
+      }
+    });
+  }
+})();
+
+window.updateCartDropdown = function(data) {
+  var countEl = document.getElementById('cart-count');
+  var totalEl = document.getElementById('cart-dropdown-total');
+  var listEl = document.getElementById('cart-dropdown-list');
+  if (!countEl || !totalEl || !listEl) return;
+  
+  var items = data.items || [];
+  var totalQty = 0;
+  
+  listEl.innerHTML = '';
+  if (items.length === 0 || data.total === 0) {
+    var li = document.createElement('li');
+    li.className = 'cart-empty-msg';
+    li.textContent = 'Your cart is empty';
+    listEl.appendChild(li);
+    countEl.textContent = '0';
+    totalEl.textContent = '₹0.00';
+    return;
+  }
+  
+  items.forEach(function(item) {
+    totalQty += item.quantity || 1;
+    var li = document.createElement('li');
+    li.className = 'cart-dropdown-item';
+    
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'cart-item-name';
+    nameSpan.textContent = item.name + (item.quantity && item.quantity > 1 ? ' (x' + item.quantity + ')' : '');
+    
+    var priceSpan = document.createElement('span');
+    priceSpan.className = 'cart-item-price';
+    priceSpan.textContent = '₹' + (item.price || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+    
+    li.appendChild(nameSpan);
+    li.appendChild(priceSpan);
+    listEl.appendChild(li);
+  });
+  
+  countEl.textContent = totalQty;
+  totalEl.textContent = '₹' + (data.total || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+};

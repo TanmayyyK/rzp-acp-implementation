@@ -3,3 +3,9 @@ node_modules/
 coverage/
 *.log
 .DS_Store
+.next/
+*.db-shm
+*.db-wal
+result.json
+test_output.txt
+neural_arbiter.db*

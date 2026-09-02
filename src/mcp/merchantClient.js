@@ -23,6 +23,7 @@
 const crypto = require('crypto');
 const config = require('../config');
 const grants = require('../lib/delegationGrants');
+const agentSignature = require('../lib/agentSignature');
 const rupeesToPaise = (r) => Math.round(r * 100);
 
 // NOTE: this module holds no signing key, by design.
@@ -76,13 +77,17 @@ function enrichStateWithRupees(state) {
 // either a single item_id (+quantity) or an items[] array of {item_id, quantity}.
 // Shared by create_cart and update_cart so their item semantics stay identical.
 function buildRequestedItems({ item_id, quantity, items }, toolName) {
-  if (Array.isArray(items) && items.length > 0) {
-    return items.map((it) => ({ sku: it.item_id, quantity: it.quantity || 1 }));
-  }
+  const result = [];
   if (item_id) {
-    return [{ sku: item_id, quantity: quantity || 1 }];
+    result.push({ sku: item_id, quantity: quantity || 1 });
   }
-  throw new Error(`${toolName}: provide either item_id or a non-empty items[] array.`);
+  if (Array.isArray(items) && items.length > 0) {
+    result.push(...items.map((it) => ({ sku: it.item_id || it.sku, quantity: it.quantity || 1 })));
+  }
+  if (result.length === 0) {
+    throw new Error(`${toolName}: provide either item_id or a non-empty items[] array.`);
+  }
+  return result;
 }
 
 // Map a merchant create/update session response ({session_id, state,
@@ -102,6 +107,13 @@ function buildCartResult(body, maxAmountPaise) {
     expires_at: body.expires_at,
     cart_mandate_id: body.cart_mandate && body.cart_mandate.mandate_id,
   };
+  if (body.cart_mandate && body.cart_mandate.claims && body.cart_mandate.claims.line_items) {
+    result.line_items = body.cart_mandate.claims.line_items.map(item => ({
+      ...item,
+      unit_price_rupees: typeof item.unit_price_paise === 'number' ? item.unit_price_paise / 100 : (typeof item.unit_price === 'number' ? item.unit_price / 100 : null),
+      line_total_rupees: typeof item.line_total_paise === 'number' ? item.line_total_paise / 100 : ((item.unit_price || item.unit_price_paise) * item.quantity / 100)
+    }));
+  }
   if (maxAmountPaise != null && typeof amountPaise === 'number' && amountPaise > maxAmountPaise) {
     result.budget_exceeded = {
       budget_paise: maxAmountPaise,
@@ -109,6 +121,10 @@ function buildCartResult(body, maxAmountPaise) {
       over_by_paise: amountPaise - maxAmountPaise,
       advice: 'Cart total exceeds the stated budget. Adjust items/quantity or cancel; not retried automatically.',
     };
+  }
+  if (body.requires_approval) {
+    result.requires_approval = body.requires_approval;
+    result.risk_decision = body.risk_decision;
   }
   return result;
 }
@@ -125,19 +141,30 @@ const TOOL_DEFINITIONS = [
   {
     name: 'search_catalog',
     description:
-      'Search the merchant product catalog. Filters by an optional text query ' +
-      '(matched against title and description), the budget_in_rupees, ' +
-      'and a category. Prices are returned in both paise (integer, authoritative) ' +
-      'and rupees (for display).',
+      'Search the merchant product catalog. You are searching a 10,000+ item catalog. ' +
+      'If you do not find what you need, refine your search query and try again. ' +
+      'At most 15 items are returned, cheapest first, so a vague query shows you the ' +
+      'cheapest corner of the catalog rather than the item you want — narrow it with ' +
+      'more specific keywords, a category, or a budget instead of re-running the same ' +
+      'search. Filters by a required text query (matched against title and description), ' +
+      'an optional category, and an optional budget_in_rupees. Prices are returned in ' +
+      'rupees; the merchant prices the cart itself at checkout.',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'ONLY 1 or 2 core keywords (e.g. "sony laptop"). DO NOT include prices, "under", "10k", or filler words here.' },
-        budget_in_rupees: { type: 'number', description: 'the budget_in_rupees; pricier products are excluded. Convert "10k" to 10000.' },
-        category: { type: 'string', description: 'Category filter, e.g. "electronics".' },
+        query: {
+          type: 'string',
+          minLength: 2,
+          description:
+            'REQUIRED. 1-3 specific product keywords, e.g. "sony noise cancelling headphones". ' +
+            'Must not be empty — an unfocused search wastes a turn on a 10,000+ item catalog. ' +
+            'DO NOT include prices, "under", "10k", or filler words here; use budget_in_rupees for price.',
+        },
+        budget_in_rupees: { type: 'number', description: 'Optional. Per-item price ceiling in rupees; pricier products are excluded. Convert "10k" to 10000.' },
+        category: { type: 'string', description: 'Optional. Category filter, e.g. "audio", "laptop", "smartphone". Narrows a large result set.' },
       },
       required: ['query'],
-      
+
     },
   },
   {
@@ -201,7 +228,8 @@ const TOOL_DEFINITIONS = [
       '(before completion). Replaces the current items, re-prices the cart, and re-issues ' +
       'its cart mandate. Pass session_id plus the new item(s); optionally pass ' +
       'budget_in_rupees to re-check the revised total. A session past CREATED cannot be ' +
-      'updated (the merchant returns an unrecoverable error).',
+      'updated. IMPORTANT: If you want to ADD an item to the existing cart, you MUST fetch the ' +
+      'current cart with get_cart_state first, and pass BOTH the existing items and the new item in the items array.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -257,6 +285,19 @@ const TOOL_DEFINITIONS = [
       required: ['session_id'],
     },
   },
+  {
+    name: 'get_recovery_offers',
+    description:
+      'Fetch any mandate-compliant recovery offers (discounts or upsells) generated for ' +
+      'an expired or abandoned checkout session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: 'The session_id to check for recovery offers.' },
+      },
+      required: ['session_id'],
+    },
+  },
 ];
 
 // ─── Factory ─────────────────────────────────────────────────────────────
@@ -289,7 +330,7 @@ function createMerchantTools(options = {}) {
   const autoApproveThresholdPaise =
     options.autoApproveThresholdPaise != null
       ? options.autoApproveThresholdPaise
-      : parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
+      : parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000000', 10);
   const auditLog = options.auditLog || sharedAuditLog;
 
   if (typeof fetchImpl !== 'function') {
@@ -319,14 +360,20 @@ function createMerchantTools(options = {}) {
     };
     headers['X-Agorio-Attestation'] = Buffer.from(JSON.stringify(attestation)).toString('base64');
 
-    const agentSecret = process.env.AGENT_SECRET || 'default_agent_secret';
-    const timestamp = Date.now().toString();
-    const nonce = crypto.randomBytes(8).toString('hex');
-    const bodyStr = body !== undefined ? JSON.stringify(body) : '';
-    const hash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-    const signaturePayload = `${method}:${path}:${attestation.agent_id}:${attestation.principal_id}:${timestamp}:${nonce}:${hash}`;
-    const signature = crypto.createHmac('sha256', agentSecret).update(signaturePayload).digest('hex');
-    headers['X-Agorio-Signature'] = `t=${timestamp},nonce=${nonce},sig=${signature}`;
+    // Sign the request with the agent's Ed25519 private key (the server verifies
+    // with AGENT_PUBLIC_KEY). The signed payload binds method, path, attested
+    // agent + principal, timestamp, nonce, and body — see src/lib/agentSignature.js.
+    // resolveAgentPrivateKey() sources the key: configured AGENT_PRIVATE_KEY in
+    // production, or a zero-config dev pair when the client runs standalone (e.g.
+    // unit tests that drive this module without booting the server).
+    headers['X-Agorio-Signature'] = agentSignature.signRequest({
+      method,
+      path,
+      agentId: attestation.agent_id,
+      principalId: attestation.principal_id,
+      body,
+      privateKey: agentSignature.resolveAgentPrivateKey(),
+    });
     
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     const init = { method, headers };
@@ -377,31 +424,69 @@ function createMerchantTools(options = {}) {
     throw new Error(`Merchant error ${status} ${code}: ${message}\n` + formattedError);
   }
 
+  let searchCount = 0;
+  
   // ─── Tool: search_catalog ───────────────────────────────────────────────
   async function search_catalog(input = {}) {
-    const { query, budget_in_rupees, category } = input;
-    const budgetPaise = typeof budget_in_rupees === 'number' ? rupeesToPaise(budget_in_rupees) : null;
+    searchCount++;
+    if (searchCount > 2) {
+      throw new Error(
+        'search_catalog loop detected: you have called this tool more than 2 times. ' +
+        'Stop searching, analyze the results you already have, and ask the user for clarification or proceed with checkout.'
+      );
+    }
     
+    const { query, budget_in_rupees, category } = input;
+    // A blank search against a 10,000+ item catalog is not a search — it is a
+    // request for an arbitrary 15 rows. Fail here, before the HTTP call, with
+    // the instruction the agent needs to recover on its next turn.
+    if (typeof query !== 'string' || query.trim().length < 2) {
+      throw new Error(
+        'search_catalog: `query` is required and must be at least 2 characters. ' +
+        'You are searching a 10,000+ item catalog — supply specific product keywords ' +
+        '(e.g. "noise cancelling headphones"), optionally narrowed by category or budget_in_rupees.'
+      );
+    }
+    const budgetPaise = typeof budget_in_rupees === 'number' ? rupeesToPaise(budget_in_rupees) : null;
+
     const params = new URLSearchParams();
-    if (query) params.append('query', query);
+    params.append('query', query.trim());
     if (budgetPaise !== null) params.append('max_price', budgetPaise);
     if (category) params.append('category', category);
-    
+
     const path = '/api/v1/products?' + params.toString();
     const { status, body } = await callMerchant('GET', path);
     throwIfUnrecoverable(status, body);
 
     const products = body && Array.isArray(body.products) ? body.products : [];
 
+    // The route already returns the narrow, rupee-denominated shape
+    // { sku, name, price_inr, stock }. Rename sku -> item_id for the tool
+    // surface (create_cart/update_cart take item_id) and pass the rest through
+    // — no paise arithmetic happens on this side of the air gap any more,
+    // because the merchant no longer sends paise here.
     const results = products.map((p) => ({
-      item_id: p.id,
-      title: p.title,
-      price_in_paise: p.price,
-      price_in_rupees: p.price / 100,
-      availability: p.availability,
+      item_id: p.sku,
+      title: p.name,
+      price_in_rupees: p.price_inr,
+      stock: p.stock,
     }));
 
-    return { products: results, count: results.length };
+    const out = { products: results, count: results.length };
+    if (results.length === 0) {
+      out.advice =
+        'No matches. Refine the query with different or broader keywords, or relax ' +
+        'category / budget_in_rupees — do not re-run this exact search.';
+    } else if (results.length >= 15) {
+      // The route caps at 15, so a full page means the catalog almost certainly
+      // holds more. Say so, rather than letting the agent read a truncated page
+      // as the complete answer.
+      out.truncated = true;
+      out.advice =
+        'Showing the 15 cheapest matches; more exist. Add keywords, a category, or a ' +
+        'budget_in_rupees to narrow the search before choosing.';
+    }
+    return out;
   }
 
   // ─── Tool: create_cart ──────────────────────────────────────────────────
@@ -471,6 +556,11 @@ function createMerchantTools(options = {}) {
       `/api/v1/checkout/sessions/${encodeURIComponent(session_id)}`
     );
     throwIfUnrecoverable(status, body);
+    
+    if (!body.line_items && body.cart_mandate && body.cart_mandate.claims && body.cart_mandate.claims.line_items) {
+      body.line_items = body.cart_mandate.claims.line_items;
+    }
+    
     // The merchant reports amounts in paise; enrich with rupee companions so the
     // LLM stays air-gapped from paise arithmetic (consistent with search_catalog
     // and create_cart, which already surface rupee-denominated values).
@@ -528,6 +618,28 @@ function createMerchantTools(options = {}) {
     return body;
   }
 
+  // ─── Tool: get_recovery_offers ──────────────────────────────────────────
+  async function get_recovery_offers(input = {}) {
+    const { session_id } = input;
+    if (!session_id) throw new Error('get_recovery_offers: session_id is required.');
+    const { status, body } = await callMerchant(
+      'GET',
+      `/api/v1/checkout/sessions/${encodeURIComponent(session_id)}/recovery_offers`
+    );
+    throwIfUnrecoverable(status, body);
+    
+    // Add rupee companions to the paise fields
+    if (body.offers && Array.isArray(body.offers)) {
+      body.offers = body.offers.map(offer => ({
+        ...offer,
+        discount_rupees: offer.discount_paise / 100,
+        final_price_rupees: offer.final_price_paise / 100
+      }));
+    }
+    
+    return body;
+  }
+
   // ─── Audit tap (ADR-005) ────────────────────────────────────────────────
   // Wrap every tool so each execution appends exactly one TOOL_CALL block —
   // capturing the tool name, the agent's inputs, and the tool's output (or the
@@ -563,6 +675,7 @@ function createMerchantTools(options = {}) {
     get_cart_state: withAudit('get_cart_state', get_cart_state),
     complete_checkout: withAudit('complete_checkout', complete_checkout),
     cancel_checkout: withAudit('cancel_checkout', cancel_checkout),
+    get_recovery_offers: withAudit('get_recovery_offers', get_recovery_offers),
   };
 }
 

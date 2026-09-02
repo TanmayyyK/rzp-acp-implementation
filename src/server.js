@@ -15,15 +15,30 @@ const express = require('express');
 const path = require('path');
 const config = require('./config');
 const { generateEd25519KeyPair } = require('./lib/jcs-eddsa');
+const agentSignature = require('./lib/agentSignature');
 
 // Initialize merchant keypair. The merchant legitimately signs its own
 // artifacts (CartMandate, PaymentMandate) as processor-of-record, so this key
 // belongs to the server. Buyer and human authority deliberately do NOT: those
 // are rooted in WebAuthn credentials the server can verify but never wield
 // (see src/circle/humanAuthorization.js).
-const merchantKeypair = generateEd25519KeyPair();
-process.env.MERCHANT_PRIVATE_KEY = merchantKeypair.privateKey;
-process.env.MERCHANT_PUBLIC_KEY = merchantKeypair.publicKey;
+if (!process.env.MERCHANT_PRIVATE_KEY || !process.env.MERCHANT_PUBLIC_KEY) {
+  console.warn('[WARN] Ephemeral merchant keypair generated. This is unsafe for production as pending CartMandates will invalidate on restart. Set MERCHANT_PRIVATE_KEY and MERCHANT_PUBLIC_KEY in your environment.');
+  const merchantKeypair = generateEd25519KeyPair();
+  process.env.MERCHANT_PRIVATE_KEY = merchantKeypair.privateKey;
+  process.env.MERCHANT_PUBLIC_KEY = merchantKeypair.publicKey;
+}
+
+// Agent identity is asymmetric (this retired the shared AGENT_SECRET HMAC): the
+// agent holds AGENT_PRIVATE_KEY and signs its requests; the server holds only
+// AGENT_PUBLIC_KEY and verifies (src/lib/agentSignature.js). In a real deployment
+// the private key lives with the agent process and the server is configured with
+// the public key alone — so if AGENT_PUBLIC_KEY is already set, we never mint a
+// private key here. For zero-config dev and the in-process test suite (where the
+// agent client runs in this same process), generate a pair when neither is set.
+// The provisioning guard lives in agentSignature so it stays in lockstep with the
+// signer's resolveAgentPrivateKey().
+agentSignature.ensureDevKeypair();
 
 // The AI SDK (`ai`, `@ai-sdk/*`) is ESM-only and is needed ONLY on the live-LLM
 // chat path, so it is required lazily in getAiRuntime() below — never at module
@@ -48,6 +63,7 @@ const userRouter = require('./routes/user');
 // Where an agent's spending authority is created: the human signs an
 // IntentMandate with their own authenticator (ADR-008).
 const mandatesRouter = require('./routes/mandates');
+const ledgerRouter = require('./routes/ledger');
 const session = require('express-session');
 const { SqliteSessionStore } = require('./lib/sqliteSessionStore');
 
@@ -123,6 +139,7 @@ app.use('/api/v1/products', productsRouter);
 // app.use feed removed
 // app.use feed removed
 app.use('/api/v1/mandates', mandatesRouter);
+app.use('/api/v1/ledger', ledgerRouter);
 app.use('/api/v1/orders', ordersRouter);
 app.use('/api/v1/checkout', checkoutRouter);
 app.use('/session', (req, res, next) => {
@@ -211,7 +228,7 @@ app.post('/audit-log/verify', (req, res) => {
 const PURCHASE_INTENT_RE = /\b(buy|order|purchase|get me|checkout|book)\b/i;
 // Auto-approve ceiling, shared system-wide with the MCP layer (paise → rupees).
 const AUTO_APPROVE_RUPEES =
-  parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10) / 100;
+  parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000000', 10) / 100;
 
 
 const merchantTools = createMerchantTools(); // Uses sharedAuditLog natively via import inside merchantClient
@@ -369,7 +386,9 @@ app.post('/chat', async (req, res) => {
   let text = '';
   
   if (Array.isArray(messages) && messages.length > 0) {
-    conversation = messages.map(m => ({ role: m.role, content: m.content }));
+    conversation = messages
+      .filter(m => m.role === 'user' || m.role === 'agent' || m.role === 'assistant')
+      .map(m => ({ role: m.role === 'agent' ? 'assistant' : m.role, content: m.content || '' }));
     text = conversation[conversation.length - 1].content.trim();
   } else if (typeof message === 'string') {
     text = message.trim();
@@ -429,11 +448,17 @@ app.post('/chat', async (req, res) => {
     result = await generateText({ model: primaryModel, ...requestOptions });
   } catch (err) {
     console.error(`Error with primary model ${provider}:`, err.message);
-    usedFallback = true;
-    try {
-      result = await generateText({ model: fallbackModel, ...requestOptions });
-    } catch (fallbackErr) {
-      console.error('Error with fallback model:', fallbackErr.message);
+    const msg = err.message || '';
+    const isRateLimitOrServerError = msg.includes('429') || msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504');
+    if (isRateLimitOrServerError) {
+      usedFallback = true;
+      try {
+        result = await generateText({ model: fallbackModel, ...requestOptions });
+      } catch (fallbackErr) {
+        console.error('Error with fallback model:', fallbackErr.message);
+        return res.json([{ role: 'agent', content: `${badge} Error generating response: ${err.message}`, timestamp: Date.now() }]);
+      }
+    } else {
       return res.json([{ role: 'agent', content: `${badge} Error generating response: ${err.message}`, timestamp: Date.now() }]);
     }
   }
@@ -466,7 +491,7 @@ app.post('/chat', async (req, res) => {
       const toolResults = step.toolResults || [];
       for (const tr of toolResults) {
         if (!tr.output) continue;
-        if (tr.toolName === 'create_cart') {
+        if (tr.toolName === 'create_cart' || tr.toolName === 'update_cart' || tr.toolName === 'get_cart_state') {
           cartOutput = tr.output;
           cartInput = tr.input || null;
         } else if (tr.toolName === 'complete_checkout') {
@@ -489,7 +514,7 @@ app.post('/chat', async (req, res) => {
     if (checkoutOutput) {
       if (checkoutOutput.order_id || checkoutOutput.razorpay_order_id) status = 'confirmed';
       else if (checkoutOutput.payment_link_url || checkoutOutput.state === 'yield_to_human') status = 'pending_approval';
-    } else if (cartOutput && cartOutput.budget_exceeded) {
+    } else if (cartOutput && (cartOutput.budget_exceeded || cartOutput.requires_approval)) {
       status = 'pending_approval';
     }
 
@@ -498,6 +523,17 @@ app.post('/chat', async (req, res) => {
       (cartOutput && cartOutput.session_id) ||
       'ORD-UNKNOWN';
     const itemName = (cartInput && (cartInput.item_id || cartInput.query)) || 'Requested items';
+    
+    let renderedItems = [];
+    if (cartOutput && Array.isArray(cartOutput.line_items) && cartOutput.line_items.length > 0) {
+      renderedItems = cartOutput.line_items.map(li => ({
+        name: li.title || li.name || li.sku || 'Item',
+        price: li.line_total_rupees !== undefined ? li.line_total_rupees : (li.unit_price_rupees || subAmt),
+        quantity: li.quantity
+      }));
+    } else {
+      renderedItems = [{ name: itemName, price: subAmt }];
+    }
 
     // Link the receipt to the real audit block for this session (the checkout /
     // orders taps append MONEY_ACTION on the shared chain), so the "chain …" on the
@@ -520,7 +556,7 @@ app.post('/chat', async (req, res) => {
         status,
         merchantName: 'Marketplace via AP2',
         orderId: sId,
-        items: [{ name: itemName, price: subAmt }],
+        items: renderedItems,
         subtotal: subAmt,
         tax: taxAmt,
         total: amt,

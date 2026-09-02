@@ -46,6 +46,7 @@ const crypto = require('crypto');
 const app = require('../src/server');
 const db = require('../src/db');
 const checkoutRouter = require('../src/routes/checkout');
+const { signRequest: signAgentRequest } = require('../src/lib/agentSignature');
 const razorpayClient = require('../src/lib/razorpayClient');
 const { resetLedger } = require('../src/lib/velocityTracker');
 const { inject } = require('./helpers/inject');
@@ -55,16 +56,31 @@ const PRINCIPAL = 'usr_alice';
 const AGENT_ID = 'buyer_agent_1';
 const CAP_PAISE = 50000000; // ₹500,000
 
-const CHEAP_SKU = 'prod_elec_007'; // ₹1,900 — what the human signs for
-const PRICEY_SKU = 'prod_elec_005'; // ₹29,990 — x100 is 1578x the approved amount
+const CHEAP_SKU = 'apple-braided-usb-c-to-usb-c-cable-2m'; // ₹1,900 — what the human signs for
+const PRICEY_SKU = 'sony-wh-1000xm5-wireless-noise-cancelling-headphones'; // ₹29,990 — x100 is 1578x the approved amount
 
 let authenticator;
 
-function agentHeaders(extra = {}) {
-  const attestation = Buffer.from(
-    JSON.stringify({ agent_id: AGENT_ID, principal_id: PRINCIPAL })
-  ).toString('base64');
-  return { 'X-Agorio-Attestation': attestation, ...extra };
+function agentHeaders(method = 'GET', url = '/', body = null, extra = {}) {
+  const attestationObj = { agent_id: AGENT_ID, principal_id: PRINCIPAL };
+  const attestation = Buffer.from(JSON.stringify(attestationObj)).toString('base64');
+  
+  // Sign with the agent's Ed25519 private key; the server verifies with the
+  // public half. The signed payload binds method/path/agent/principal/body.
+  const signatureHeader = signAgentRequest({
+    method,
+    path: url,
+    agentId: attestationObj.agent_id,
+    principalId: attestationObj.principal_id,
+    body,
+    privateKey: process.env.AGENT_PRIVATE_KEY,
+  });
+
+  return { 
+    'X-Agorio-Attestation': attestation,
+    'X-Agorio-Signature': signatureHeader,
+    ...extra 
+  };
 }
 
 async function loginAsHuman() {
@@ -104,7 +120,7 @@ function agentCreatesCart(grantId, sku, quantity = 1) {
   return inject(app, {
     method: 'POST',
     url: '/api/v1/checkout/sessions',
-    headers: agentHeaders(),
+    headers: agentHeaders('POST', '/api/v1/checkout/sessions', { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] }),
     body: { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] },
   });
 }
@@ -115,7 +131,7 @@ function completeInFlight(sessionId, body = {}) {
   return inject(app, {
     method: 'POST',
     url: `/api/v1/checkout/sessions/${sessionId}/complete`,
-    headers: agentHeaders({ 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
+    headers: agentHeaders('POST', `/api/v1/checkout/sessions/${sessionId}/complete`, body, { 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
     body,
   });
 }
@@ -124,7 +140,7 @@ function patchCart(sessionId, sku, quantity) {
   return inject(app, {
     method: 'PATCH',
     url: `/api/v1/checkout/sessions/${sessionId}`,
-    headers: agentHeaders(),
+    headers: agentHeaders('PATCH', `/api/v1/checkout/sessions/${sessionId}`, { requested_items: [{ sku, quantity }] }),
     body: { requested_items: [{ sku, quantity }] },
   });
 }
@@ -133,7 +149,7 @@ function readSession(sessionId) {
   return inject(app, {
     method: 'GET',
     url: `/api/v1/checkout/sessions/${sessionId}`,
-    headers: agentHeaders(),
+    headers: agentHeaders('GET', `/api/v1/checkout/sessions/${sessionId}`),
   });
 }
 
@@ -294,7 +310,7 @@ describe('CANCEL during an in-flight COMPLETE', () => {
     const cancelled = await inject(app, {
       method: 'POST',
       url: `/api/v1/checkout/sessions/${sessionId}/cancel`,
-      headers: agentHeaders({ 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
+      headers: agentHeaders('POST', `/api/v1/checkout/sessions/${sessionId}/cancel`, {}, { 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
       body: {},
     });
     expect(cancelled.status).toBe(409);

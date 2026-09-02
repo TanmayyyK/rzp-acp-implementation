@@ -33,7 +33,9 @@ const crypto = require('crypto');
 const app = require('../src/server');
 const db = require('../src/db');
 const checkoutRouter = require('../src/routes/checkout');
+const { signRequest: signAgentRequest } = require('../src/lib/agentSignature');
 const { resetLedger } = require('../src/lib/velocityTracker');
+const { sharedAuditLog: auditLog } = require('../src/lib/auditLog');
 const { inject } = require('./helpers/inject');
 const { SoftAuthenticator } = require('./helpers/softAuthenticator');
 
@@ -41,36 +43,63 @@ const PRINCIPAL = 'usr_alice';
 const AGENT_ID = 'buyer_agent_1';
 const CAP_PAISE = 50000000;
 
-const EARBUDS = 'prod_elec_002'; // Boult Z40, ₹1,799
-const POWER_BANK = 'prod_elec_003'; // Mi Power Bank, ₹1,999
-const OUT_OF_STOCK = 'prod_elec_004'; // Razer Huntsman Mini, availability 0
+// Fixtures are named, then priced FROM the catalog rather than from a literal.
+// The whole point of this suite is that the merchant is the pricing authority:
+// hardcoding 179900 here would let a seed change silently drift the assertion
+// away from what the server actually charges. Reading the price back is also the
+// only honest way to assert "the total equals catalog price times quantity".
+const EARBUDS = 'nothing-ear-a-wireless-earbuds';
+const POWER_BANK = 'anker-737-power-bank-powercore-24k';
+const OUT_OF_STOCK = 'apple-braided-usb-c-to-usb-c-cable-2m'; // forced unavailable in beforeAll
+
+const catalogPaise = (sku) =>
+  db.prepare('SELECT COALESCE(unit_price_paise, price_paise) AS p FROM products WHERE id = ? OR sku = ?')
+    .get(sku, sku).p;
+
+const EARBUDS_PAISE = catalogPaise(EARBUDS);
+const POWER_BANK_PAISE = catalogPaise(POWER_BANK);
 
 let authenticator;
 let grantId;
 
 // ─── Harness ────────────────────────────────────────────────────────────
 
-function agentHeaders(extra = {}) {
-  const attestation = Buffer.from(
-    JSON.stringify({ agent_id: AGENT_ID, principal_id: PRINCIPAL })
-  ).toString('base64');
-  return { 'X-Agorio-Attestation': attestation, ...extra };
+function agentHeaders(method = 'GET', url = '/', body = null, extra = {}) {
+  const attestationObj = { agent_id: AGENT_ID, principal_id: PRINCIPAL };
+  const attestation = Buffer.from(JSON.stringify(attestationObj)).toString('base64');
+  
+  // Sign with the agent's Ed25519 private key; the server verifies with the
+  // public half. `url` is the full path (originalUrl, incl. query) the server sees.
+  const signatureHeader = signAgentRequest({
+    method,
+    path: url,
+    agentId: attestationObj.agent_id,
+    principalId: attestationObj.principal_id,
+    body,
+    privateKey: process.env.AGENT_PRIVATE_KEY,
+  });
+
+  return { 
+    'X-Agorio-Attestation': attestation,
+    'X-Agorio-Signature': signatureHeader,
+    ...extra 
+  };
 }
 
 function idempotencyKey() {
   return `idem_${crypto.randomBytes(6).toString('hex')}`;
 }
 
-function get(url, headers = agentHeaders()) {
-  return inject(app, { method: 'GET', url, headers });
+function get(url, headers) {
+  return inject(app, { method: 'GET', url, headers: headers || agentHeaders('GET', url) });
 }
 
-function post(url, body = {}, headers = agentHeaders()) {
-  return inject(app, { method: 'POST', url, headers, body });
+function post(url, body = {}, headers) {
+  return inject(app, { method: 'POST', url, headers: headers || agentHeaders('POST', url, body), body });
 }
 
-function patch(url, body = {}, headers = agentHeaders()) {
-  return inject(app, { method: 'PATCH', url, headers, body });
+function patch(url, body = {}, headers) {
+  return inject(app, { method: 'PATCH', url, headers: headers || agentHeaders('PATCH', url, body), body });
 }
 
 /** The real ceremony: the server proposes a grant envelope, the human signs it. */
@@ -108,13 +137,13 @@ function createSession(items = [{ sku: EARBUDS, quantity: 1 }]) {
 }
 
 function completeSession(sessionId, key = idempotencyKey(), body = {}) {
-  return post(`/api/v1/checkout/sessions/${sessionId}/complete`, body,
-    agentHeaders({ 'Idempotency-Key': key }));
+  const url = `/api/v1/checkout/sessions/${sessionId}/complete`;
+  return post(url, body, agentHeaders('POST', url, body, { 'Idempotency-Key': key }));
 }
 
 function cancelSession(sessionId) {
-  return post(`/api/v1/checkout/sessions/${sessionId}/cancel`, {},
-    agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+  const url = `/api/v1/checkout/sessions/${sessionId}/cancel`;
+  return post(url, {}, agentHeaders('POST', url, {}, { 'Idempotency-Key': idempotencyKey() }));
 }
 
 beforeAll(() => {
@@ -123,6 +152,10 @@ beforeAll(() => {
        ON CONFLICT(principal_id) DO UPDATE SET budget_cap_paise = excluded.budget_cap_paise,
                                               delegation_mode = 'full'`
   ).run(PRINCIPAL, CAP_PAISE);
+  // The seed ships nothing out of stock, so the PRODUCT_UNAVAILABLE branch needs
+  // a row forced unavailable. Restored in afterAll so the catalogue other suites
+  // read is unchanged.
+  db.prepare('UPDATE products SET availability = 0 WHERE id = ?').run(OUT_OF_STOCK);
 });
 
 beforeEach(async () => {
@@ -138,6 +171,7 @@ beforeEach(async () => {
 
 afterAll(() => {
   db.prepare('DELETE FROM delegation_grants WHERE principal_id = ?').run(PRINCIPAL);
+  db.prepare('UPDATE products SET availability = 1 WHERE id = ?').run(OUT_OF_STOCK);
   resetLedger();
 });
 
@@ -151,7 +185,7 @@ describe('POST /api/v1/checkout/sessions', () => {
     expect(res.status).toBe(201);
     expect(res.body.session_id).toMatch(/^acp_sess_/);
     expect(res.body.state).toBe('CREATED');
-    expect(res.body.amount_total).toBe(179900);
+    expect(res.body.amount_total).toBe(EARBUDS_PAISE);
     expect(res.body.currency).toBe('INR');
     expect(res.body.expires_at).toBeDefined();
 
@@ -239,7 +273,47 @@ describe('POST /api/v1/checkout/sessions', () => {
       { sku: POWER_BANK, quantity: 1 },
     ]);
     expect(res.status).toBe(201);
-    expect(res.body.amount_total).toBe(179900 * 2 + 199900);
+    expect(res.body.amount_total).toBe(EARBUDS_PAISE * 2 + POWER_BANK_PAISE);
+  });
+
+  test('agent-supplied prices are stripped, not honoured, and the refusal is audited', async () => {
+    // The hallucination case: a buyer agent asserts its own price. Only sku and
+    // quantity are read; everything else is dropped before the total is computed,
+    // so the charge is the catalog price no matter what the agent claimed.
+    const before = auditLog.entries().length;
+
+    const res = await createSession([
+      {
+        sku: EARBUDS,
+        quantity: 1,
+        price: 1,
+        unit_price: 1,
+        amount: 1,
+        unit_price_paise: 1,
+        currency: 'USD',
+      },
+    ]);
+
+    expect(res.status).toBe(201);
+    expect(res.body.amount_total).toBe(EARBUDS_PAISE); // not 1
+    expect(res.body.currency).toBe('INR');
+
+    // The cart the merchant signed carries its own price, not the agent's.
+    const line = res.body.cart_mandate.claims.line_items[0];
+    expect(line.unit_price).toBe(EARBUDS_PAISE);
+
+    // The trail shows the fields were seen and refused, not silently ignored.
+    const stripped = auditLog
+      .entries()
+      .slice(before)
+      .find((e) => e.payload && e.payload.check === 'agent_supplied_pricing');
+    expect(stripped).toBeDefined();
+    expect(stripped.payload.outcome).toBe('STRIPPED');
+    expect(stripped.payload.detail.note).toBe('IGNORED_AGENT_SUPPLIED_ITEM_FIELDS');
+    expect(stripped.payload.detail.stripped.map((s) => s.field).sort()).toEqual(
+      ['amount', 'currency', 'price', 'unit_price', 'unit_price_paise']
+    );
+    expect(auditLog.verifyChain().valid).toBe(true); // hash chain intact
   });
 });
 
@@ -260,7 +334,7 @@ describe('PATCH /api/v1/checkout/sessions/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CREATED');
-    expect(res.body.amount_total).toBe(199900);
+    expect(res.body.amount_total).toBe(POWER_BANK_PAISE);
     expect(res.body.cart_mandate.mandate_id).not.toBe(oldMandateId);
     // A replacement cart chains to the grant, not to the cart it supersedes: the
     // AP2 chain records what authorized this cart, and the discarded cart
@@ -301,12 +375,12 @@ describe('GET /api/v1/checkout/sessions/:id', () => {
     expect(res.body.session_id).toBe(sessionId);
     expect(res.body.state).toBe('CREATED');
     expect(res.body.order_id).toMatch(/^ord_/);
-    expect(res.body.amount).toBe(179900);
+    expect(res.body.amount).toBe(EARBUDS_PAISE);
     expect(res.body.currency).toBe('INR');
 
     expect(res.body.line_items).toHaveLength(1);
     expect(res.body.line_items[0].sku).toBe(EARBUDS);
-    expect(res.body.line_items[0].unit_price).toBe(179900);
+    expect(res.body.line_items[0].unit_price).toBe(EARBUDS_PAISE);
 
     expect(res.body.mandate_chain.intent_mandate_id).toBe(grantId);
     expect(res.body.mandate_chain.cart_mandate_id).toMatch(/^man_cart/);
@@ -507,7 +581,7 @@ describe('short /session aliases', () => {
     expect(res.body.session_id).toMatch(/^acp_sess_/);
     expect(res.body.state).toBe('CREATED');
     expect(res.body.cart_mandate.type).toBe('CartMandate');
-    expect(res.body.amount_total).toBe(179900);
+    expect(res.body.amount_total).toBe(EARBUDS_PAISE);
     expect(res.body.currency).toBe('INR');
   });
 
@@ -522,21 +596,21 @@ describe('short /session aliases', () => {
       requested_items: [{ sku: POWER_BANK, quantity: 1 }],
     });
     expect(patched.status).toBe(200);
-    expect(patched.body.amount_total).toBe(199900);
+    expect(patched.body.amount_total).toBe(POWER_BANK_PAISE);
 
     const got = await get(`/session/${sessionId}`);
     expect(got.status).toBe(200);
-    expect(got.body.amount).toBe(199900);
+    expect(got.body.amount).toBe(POWER_BANK_PAISE);
     expect(got.body.mandate_chain.cart_mandate_id).toBe(patched.body.cart_mandate.mandate_id);
 
-    const completed = await post(`/session/${sessionId}/complete`, {},
-      agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+    const completeUrl = `/session/${sessionId}/complete`;
+    const completed = await post(completeUrl, {}, agentHeaders('POST', completeUrl, {}, { 'Idempotency-Key': idempotencyKey() }));
     expect(completed.status).toBe(200);
     expect(completed.body.next).toBe('await_webhook');
     expect(completed.body.order.razorpay_order_id).toMatch(/^order_simulated_/);
 
-    const cancelled = await post(`/session/${sessionId}/cancel`, {},
-      agentHeaders({ 'Idempotency-Key': idempotencyKey() }));
+    const cancelUrl = `/session/${sessionId}/cancel`;
+    const cancelled = await post(cancelUrl, {}, agentHeaders('POST', cancelUrl, {}, { 'Idempotency-Key': idempotencyKey() }));
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.state).toBe('CANCELLED');
   });

@@ -24,10 +24,6 @@ const { commitSpend, releaseSpend } = require('../lib/velocityTracker');
 
 const router = express.Router();
 
-// Track processed event IDs for idempotent webhook handling (ADR-007).
-// In production, swap for Redis/Postgres.
-const processedEventIds = new Set();
-
 router.post('/', (req, res) => {
   let event;
   try {
@@ -62,10 +58,10 @@ router.post('/', (req, res) => {
     event = JSON.parse(rawBody.toString('utf8'));
 
     // Idempotency — deduplicate on event.id (ADR-007)
+    // claimWebhook uses SQLite ON CONFLICT(event_id) DO NOTHING, which guarantees cluster-wide deduplication safely.
     if (!event.id || !claimWebhook(event)) {
       return res.status(200).json({ status: 'already_processed' });
     }
-    processedEventIds.add(event.id);
 
     // Audit the verified, first-seen webhook on the shared chain (best-effort
     // session correlation from the entity notes). Placed after the idempotency
@@ -92,7 +88,7 @@ router.post('/', (req, res) => {
         
         const session = (sessionId ? sessionsMap.get(sessionId) : null) ||
           findSessionByRazorpayReference({ orderId: orderEntity.id });
-        if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
+        if (session && ['CREATED', 'CONFIRMED', 'EXPIRED'].includes(session.state)) {
           if (session.state === 'CREATED') {
             Object.assign(session, transitionSession(session, 'CONFIRMED'));
           }
@@ -124,7 +120,7 @@ router.post('/', (req, res) => {
             orderId: paymentEntity.order_id,
             paymentLinkId: paymentEntity.invoice_id,
           });
-        if (session && ['CREATED', 'CONFIRMED'].includes(session.state)) {
+        if (session && ['CREATED', 'CONFIRMED', 'EXPIRED'].includes(session.state)) {
           if (session.state === 'CREATED') {
             Object.assign(session, transitionSession(session, 'CONFIRMED'));
           }
@@ -196,8 +192,5 @@ router.post('/', (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-
-// Exported for testing
-router._processedEventIds = processedEventIds;
 
 module.exports = router;

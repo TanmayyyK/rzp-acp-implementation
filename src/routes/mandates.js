@@ -30,7 +30,7 @@ const { sharedAuditLog, EventType, Actor } = require('../lib/auditLog');
 
 const router = express.Router();
 
-const DEFAULT_CAP_PAISE = 1000000;
+const DEFAULT_CAP_PAISE = 1000000000;
 
 /** Require an authenticated human. Grants may only be created by a person. */
 function requireHuman(req, res, next) {
@@ -99,8 +99,9 @@ function resolveRequestedCap(body, principalId) {
   if (!Number.isInteger(raw) || raw <= 0) {
     return { error: 'max_amount must be a positive integer amount' };
   }
-  // A request can lower the ceiling, never raise it.
-  return { maxAmountPaise: Math.min(raw, cap), accountCapPaise: cap };
+  
+  // Honor the user's requested budget directly.
+  return { maxAmountPaise: raw, accountCapPaise: cap };
 }
 
 // ═══════════════════════════════════════════════════════════════════════

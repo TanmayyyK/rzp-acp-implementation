@@ -18,7 +18,7 @@
 const crypto = require('crypto');
 
 const RP_ID = process.env.WEBAUTHN_RP_ID || 'localhost';
-const ORIGIN = process.env.WEBAUTHN_ORIGIN || `https://${RP_ID}`;
+const ORIGIN = process.env.WEBAUTHN_ORIGIN || `http://${RP_ID}:3000`;
 
 function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest();

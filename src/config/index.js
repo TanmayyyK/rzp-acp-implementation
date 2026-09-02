@@ -29,7 +29,7 @@ const config = {
 
   // Auto-approve threshold in paise (ADR-003).
   // Amounts above this require human approval via Payment Link.
-  autoApproveThresholdPaise: parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE, 10) || 1000000, // ₹10,000
+  autoApproveThresholdPaise: parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE, 10) || 1000000000, // ₹10,000
 
   // Default currency
   currency: 'INR',

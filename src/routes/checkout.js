@@ -53,12 +53,14 @@ const {
   releaseCheckoutLock,
 } = require('../lib/durableCommerceStore');
 const { isValidIdempotencyKey } = require('../lib/razorpayIdempotencyWrapper');
+const agentSignature = require('../lib/agentSignature');
 
 const router = express.Router();
 
 // ─── Agent Authentication (Fix for Forgable agent identity) ─────────────
 function authenticateCheckout(req, res, next) {
   const humanPrincipal = req.session && req.session.authenticated ? req.session.principal_id : null;
+  console.log(`[Auth] authenticateCheckout for ${req.path}: req.session=${!!req.session}, authenticated=${req.session?.authenticated}, principal_id=${req.session?.principal_id}, humanPrincipal=${humanPrincipal}`);
   if (humanPrincipal) {
     req.caller = { kind: 'human', principalId: humanPrincipal };
     return next();
@@ -76,42 +78,23 @@ function authenticateCheckout(req, res, next) {
     return errorResponse(res, 400, 'INVALID_ATTESTATION', 'Invalid X-Agorio-Attestation header');
   }
 
-  // Bypass signature check in test environment if X-Agorio-Signature is missing,
-  // to avoid breaking all existing tests that don't send signatures.
-  if (!signatureHeader && process.env.NODE_ENV === 'test') {
-    req.caller = { kind: 'agent', agentId: attestation.agent_id, principalId: attestation.principal_id };
-    return next();
-  }
-
-  if (!signatureHeader) {
-    return errorResponse(res, 401, 'SIGNATURE_REQUIRED', 'Missing X-Agorio-Signature header');
-  }
-  
-  const sigParts = signatureHeader.split(',').reduce((acc, part) => {
-    const [k, v] = part.split('=');
-    acc[k] = v;
-    return acc;
-  }, {});
-
-  const { t, nonce, sig } = sigParts;
-  if (!t || !nonce || !sig) {
-    return errorResponse(res, 400, 'INVALID_SIGNATURE', 'Invalid X-Agorio-Signature format');
-  }
-
-  if (Date.now() - parseInt(t, 10) > 5 * 60 * 1000) {
-    return errorResponse(res, 401, 'SIGNATURE_EXPIRED', 'Signature has expired');
-  }
-
-  const agentSecret = process.env.AGENT_SECRET || 'default_agent_secret';
-  const method = req.method;
+  // Verify the agent's Ed25519 request signature. The server holds only
+  // AGENT_PUBLIC_KEY; it can verify the agent's identity but never forge it.
+  // The signed payload binds this exact request (method, path, attested agent +
+  // principal, timestamp, nonce, body) so a captured signature cannot be replayed.
   const originalPath = req.originalUrl || (req.baseUrl + req.path) || req.path;
-  const bodyStr = (req.method === 'GET' || req.method === 'HEAD') ? '' : JSON.stringify(req.body || {});
-  const hash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-  const signaturePayload = `${method}:${originalPath}:${attestation.agent_id}:${attestation.principal_id}:${t}:${nonce}:${hash}`;
-  const expectedSig = crypto.createHmac('sha256', agentSecret).update(signaturePayload).digest('hex');
+  const verdict = agentSignature.verifyRequest({
+    header: signatureHeader,
+    method: req.method,
+    path: originalPath,
+    agentId: attestation.agent_id,
+    principalId: attestation.principal_id,
+    body: req.body,
+    publicKey: process.env.AGENT_PUBLIC_KEY,
+  });
 
-  if (sig !== expectedSig) {
-    return errorResponse(res, 403, 'INVALID_SIGNATURE', 'Signature verification failed');
+  if (!verdict.ok) {
+    return errorResponse(res, verdict.status, verdict.code, verdict.message);
   }
 
   req.caller = { kind: 'agent', agentId: attestation.agent_id, principalId: attestation.principal_id };
@@ -170,27 +153,83 @@ function codedError(code, message) {
 
 /**
  * Resolve requested line items against the product feed.
- * Returns { items, total } or throws a codedError the caller maps to a 400.
+ * Returns { items, total, guardrailItems, strippedFields } or throws a
+ * codedError the caller maps to a 400.
+ *
+ * ZERO-TRUST PRICING FIREWALL. The buyer agent supplies exactly two things per
+ * line: a `sku` and a `quantity`. Nothing else it sends is read — not `price`,
+ * not `amount`, not `unit_price`, not `line_total`. Those keys are dropped here,
+ * at the trust boundary, and reported back so the caller can put the refusal on
+ * the audit chain: an LLM that hallucinates a price must leave a trace of having
+ * tried, not have the field quietly ignored somewhere downstream.
+ *
+ * Every price is then read fresh from the catalog on every resolve — including
+ * on PATCH, so a revision re-prices rather than carrying a stale quote — and the
+ * total is summed from those reads. That server-computed integer is what becomes
+ * session.amount, and session.amount alone is what reaches the WebAuthn step-up
+ * (authorizeCompletion -> humanAuth.verifyApprovalMandate) and the Razorpay
+ * order. There is no code path from an agent-supplied number to a charge.
  */
+
+// The only keys accepted from the caller. Anything else on a requested item is
+// dropped by sanitizeRequestedItem below.
+const ALLOWED_ITEM_KEYS = new Set(['sku', 'quantity']);
+
+/**
+ * Reduce one caller-supplied item to { sku, quantity }, reporting every key that
+ * was dropped so the refusal can be audited.
+ */
+function sanitizeRequestedItem(item, index, stripped) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    throw codedError('INVALID_ITEMS', `requested_items[${index}] must be an object with a sku and a quantity.`);
+  }
+  for (const key of Object.keys(item)) {
+    if (!ALLOWED_ITEM_KEYS.has(key)) {
+      stripped.push({ index, field: key, supplied: item[key] });
+    }
+  }
+  return { sku: item.sku, quantity: item.quantity };
+}
+
 function resolveLineItems(requestedItems) {
   const resolved = [];
   const guardrailItems = [];
+  const strippedFields = [];
   let total = 0;
 
-  for (const item of requestedItems) {
+  for (const [index, rawItem] of requestedItems.entries()) {
+    // Strip first, read the catalog second. The row below is the only source of
+    // price, category, and risk tier for the rest of this request.
+    const item = sanitizeRequestedItem(rawItem, index, strippedFields);
+
     // The ACP LineItem contract keys catalog items by `sku` (docs/ACP_ENDPOINT_SCHEMAS.md,
     // the merchant MCP tools, and the checkout tests all send `sku`). It maps to the
     // products table's `id` primary key. Reading `item.id` here bound `undefined`, so
     // every agent-driven cart resolved to no row and 500'd — the INTERNAL_ERROR the
     // buyer agent reported.
+    //
+    // Matched on either key, agreeing with the guardrail engine's own lookup
+    // (src/middleware/guardrails.js). Both columns are UNIQUE-indexed, so this is
+    // an indexed OR, and a catalog where sku and id diverge can no longer resolve
+    // in one layer and 404 in the other.
+    //
+    // `unit_price_paise` is the authoritative price column, matching the search
+    // route's projection; COALESCE keeps rows that only populated the NOT NULL
+    // `price_paise` resolvable. risk_tier comes back on the same read so the
+    // guardrail boundary and the price boundary see one consistent row.
     const sku = item.sku;
-    const productRow = db.prepare('SELECT * FROM products WHERE id = ?').get(sku);
+    const productRow = db.prepare(
+      'SELECT id, title, category, availability, risk_tier, ' +
+      'COALESCE(unit_price_paise, price_paise) AS unit_price_paise ' +
+      'FROM products WHERE id = ? OR sku = ?'
+    ).get(sku, sku);
     const product = productRow ? {
       id: productRow.id,
       title: productRow.title,
-      price: productRow.price_paise,
+      price: productRow.unit_price_paise,
       availability: productRow.availability === 1,
-      category: productRow.category
+      category: productRow.category,
+      riskTier: productRow.risk_tier,
     } : undefined;
 
     // These carry `code` because both callers (POST /sessions, PATCH
@@ -203,6 +242,11 @@ function resolveLineItems(requestedItems) {
     }
     if (!product.availability) {
       throw codedError('PRODUCT_UNAVAILABLE', `Product ${product.title} is currently out of stock.`);
+    }
+    // A row with no usable price cannot be charged for. Refusing here keeps a
+    // NULL from summing into the total as NaN and reaching Razorpay.
+    if (!Number.isInteger(product.price) || product.price < 0) {
+      throw codedError('PRODUCT_NOT_PRICED', `Product ${product.title} has no valid catalog price.`);
     }
 
     const qty = parseInt(item.quantity, 10);
@@ -228,16 +272,40 @@ function resolveLineItems(requestedItems) {
       quantity: qty,
       unit_price: product.price
     });
-    guardrailItems.push({ 
-      sku: product.id, 
-      category: product.category, 
-      quantity: qty, 
-      name: product.title, 
-      price: lineTotal 
+    guardrailItems.push({
+      sku: product.id,
+      category: product.category,
+      quantity: qty,
+      name: product.title,
+      risk_tier: product.riskTier,
+      price: lineTotal
     });
   }
 
-  return { items: resolved, total, guardrailItems };
+  return { items: resolved, total, guardrailItems, strippedFields };
+}
+
+/**
+ * Put an agent's attempt to dictate price on the audit chain. Mirrors the buyer
+ * client's IGNORED_AGENT_SUPPLIED_LIMIT block: the trail must show the field was
+ * seen and refused, not that it was never sent.
+ */
+function auditStrippedItemFields(sessionId, strippedFields) {
+  if (!strippedFields || strippedFields.length === 0) return;
+  auditLog.append({
+    session_id: sessionId,
+    actor: Actor.GUARDRAIL,
+    event_type: EventType.GUARDRAIL_DECISION,
+    payload: {
+      check: 'agent_supplied_pricing',
+      outcome: 'STRIPPED',
+      detail: {
+        note: 'IGNORED_AGENT_SUPPLIED_ITEM_FIELDS',
+        message: 'Only sku and quantity are accepted on a requested item; the merchant prices the cart from its own catalog.',
+        stripped: strippedFields,
+      },
+    },
+  });
 }
 
 const { signEdDSA } = require('../lib/jcs-eddsa');
@@ -331,7 +399,7 @@ function errorResponse(res, status, code, message, retriable = false, sessionId)
 
 // ─── Completion authorization ───────────────────────────────────────────
 
-const DEFAULT_CAP_PAISE = 1000000;
+const DEFAULT_CAP_PAISE = 1000000000;
 
 /**
  * Decode the ADR-008 attestation header.
@@ -428,6 +496,14 @@ async function authorizeCompletion(req, session) {
   const capPaise = Math.min(resolved.grant.max_amount_paise, accountCapPaise);
 
   const decision = evaluateDelegation(delegationMode, session.amount, capPaise);
+
+  const { checkRiskTier } = require('../middleware/guardrails');
+  const riskGuard = checkRiskTier(session.lineItems || []);
+  if (riskGuard.outcome === 'FAIL') {
+    decision.allowed = false;
+    decision.requiresApprovalMandate = true;
+    decision.reason = 'critical risk tier detected, human approval required';
+  }
 
   // --- Per-transaction human approval, when delegation alone is not enough ---
   let approvedBy = 'delegation-grant';
@@ -558,10 +634,16 @@ router.post('/sessions', (req, res) => {
     }
 
     // --- Resolve items against feed ---
-    const { items, total, guardrailItems } = resolveLineItems(requested_items);
+    // Zero-trust pricing: only sku + quantity survive; the total below is summed
+    // from catalog reads, never from anything the agent sent.
+    const { items, total, guardrailItems, strippedFields } = resolveLineItems(requested_items);
 
     const sessionId = generateId('acp_sess');
     const orderId = generateId('ord');
+
+    // Record any price/amount fields the agent tried to dictate, now that there
+    // is a session id to correlate the refusal against.
+    auditStrippedItemFields(sessionId, strippedFields);
 
     // --- ADR-006 guardrails at the intent -> cart boundary: category allowlist
     // + per-order quantity, checked against the buyer's IntentMandate. Every
@@ -595,6 +677,10 @@ router.post('/sessions', (req, res) => {
       return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to build a valid cart mandate');
     }
 
+    const { checkRiskTier } = require('../middleware/guardrails');
+    const riskDecision = checkRiskTier(guardrailItems);
+    const requiresApproval = riskDecision.outcome === 'FAIL';
+
     // Store session
     const session = {
       sessionId,
@@ -617,6 +703,8 @@ router.post('/sessions', (req, res) => {
       createdAt: now(),
       updatedAt: now(),
       failure: null,
+      requiresApproval: requiresApproval,
+      riskDecision: requiresApproval ? riskDecision : null,
     };
 
     sessions.set(sessionId, session);
@@ -649,6 +737,8 @@ router.post('/sessions', (req, res) => {
       // which is not a field on a Shape-C envelope (it is `expires_at`), so this
       // shipped undefined and an agent had no re-quote deadline at all.
       expires_at: cartMandate.expires_at,
+      requires_approval: requiresApproval,
+      risk_decision: requiresApproval ? riskDecision : null,
     });
   } catch (err) {
     if (err.code) {
@@ -685,8 +775,11 @@ router.patch('/sessions/:id', (req, res) => {
         'requested_items must be a non-empty array', false, session.sessionId);
     }
 
-    // Resolve new items
-    const { items, total, guardrailItems } = resolveLineItems(requested_items);
+    // Resolve new items. A revision re-prices from the catalog exactly as
+    // creation does (the previous quote is never carried forward), and the
+    // agent's price/amount fields are stripped here too.
+    const { items, total, guardrailItems, strippedFields } = resolveLineItems(requested_items);
+    auditStrippedItemFields(session.sessionId, strippedFields);
 
     // --- ADR-006 guardrails (intent -> cart boundary), same as create: the
     // updated basket is re-checked against the stored intent's allowlist and
@@ -719,12 +812,18 @@ router.patch('/sessions/:id', (req, res) => {
         'Failed to build a valid cart mandate', false, session.sessionId);
     }
 
+    const { checkRiskTier } = require('../middleware/guardrails');
+    const riskDecision = checkRiskTier(guardrailItems);
+    const requiresApproval = riskDecision.outcome === 'FAIL';
+
     // Update session
     session.lineItems = cartMandate.claims.line_items;
     session.amount = total;
     session.cartMandate = cartMandate;
     session.cartMandateId = cartMandate.mandate_id;
     session.updatedAt = now();
+    session.requiresApproval = requiresApproval;
+    session.riskDecision = requiresApproval ? riskDecision : null;
 
 
     return res.json({
@@ -736,6 +835,8 @@ router.patch('/sessions/:id', (req, res) => {
       // Same clock POST /sessions reports: the replacement cart's own expiry, not
       // the grant's. The two responses disagreed before.
       expires_at: cartMandate.expires_at,
+      requires_approval: requiresApproval,
+      risk_decision: requiresApproval ? riskDecision : null,
     });
   } catch (err) {
     if (err.code) {
@@ -1002,7 +1103,7 @@ router.post('/sessions/:id/complete', async (req, res) => {
     // and writes a provisional ledger entry so concurrent callers see the
     // reserved amount. We must commitSpend on success or releaseSpend on failure.
     const userRowVelocity = db.prepare('SELECT budget_cap_paise FROM users WHERE principal_id = ?').get(principalId);
-    const accountCapPaise = userRowVelocity ? userRowVelocity.budget_cap_paise : 50000000;
+    const accountCapPaise = userRowVelocity ? userRowVelocity.budget_cap_paise : DEFAULT_CAP_PAISE;
     // The rolling window ceiling is the account cap. A human-signed
     // ApprovalMandate raises it by exactly the amount they signed for and no
     // further: spend already recorded in the window still counts against the
@@ -1036,7 +1137,7 @@ router.post('/sessions/:id/complete', async (req, res) => {
     session.reservationPrincipalId = principalId;
 
     // --- Day 4: Call live Razorpay API via Idempotency Wrapper ---
-    const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000', 10);
+    const autoApproveThreshold = parseInt(process.env.AUTO_APPROVE_THRESHOLD_PAISE || '1000000000', 10);
     const razorpayClient = require('../lib/razorpayClient');
 
     session.paymentMandateId = paymentMandate.mandate_id;
@@ -1250,6 +1351,12 @@ router.post('/sessions/:id/complete', async (req, res) => {
 
 router.post('/sessions/:id/cancel', async (req, res) => {
   try {
+    const idempotencyKey = req.headers['idempotency-key'] || `cancel_${req.params.id}`;
+    if (!isValidIdempotencyKey(idempotencyKey) && idempotencyKey !== `cancel_${req.params.id}`) {
+      return errorResponse(res, 400, 'INVALID_IDEMPOTENCY_KEY',
+        'Idempotency-Key must be 8-128 URL-safe characters', false, req.params.id);
+    }
+
     const session = sessions.get(req.params.id);
 
     if (!session) {
@@ -1257,62 +1364,111 @@ router.post('/sessions/:id/cancel', async (req, res) => {
         `No session with id ${req.params.id}`, false, req.params.id);
     }
 
+    const priorCompletion = getCompletionResponse(session.sessionId, idempotencyKey);
+    if (priorCompletion) {
+      return res.status(priorCompletion.statusCode).json(priorCompletion.body);
+    }
+
     if (session.state === 'CANCELLED') {
       return errorResponse(res, 409, 'ALREADY_CANCELLED',
         'Session is already cancelled', false, session.sessionId);
     }
 
-    // A completion in flight owns this session. Cancelling underneath it races
-    // the same way a PATCH does: this handler awaits Razorpay before writing
-    // `Object.assign(session, nextSession)`, so the two writers interleave and
-    // the loser's state is silently discarded — a charged order left CANCELLED,
-    // or a cancelled session that confirms anyway. Retriable: the caller can
-    // cancel once the completion settles, or the completion itself failed and
-    // released the lock.
-    if (session._isProcessing) {
+    if (session._isProcessing && session._processingIdempotencyKey !== idempotencyKey) {
       return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
         'Cannot cancel while a completion is in progress', true, session.sessionId);
     }
 
-    let nextSession;
-    try {
-      nextSession = transitionSession(session, 'CANCELLED');
-    } catch (err) {
-      if (err.name === 'InvalidStateTransitionError') {
-        return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
-          err.message, false, session.sessionId);
-      }
-      throw err;
+    if (!tryAcquireCheckoutLock(session.sessionId, idempotencyKey)) {
+      return errorResponse(res, 409, 'CHECKOUT_IN_PROGRESS',
+        'Another worker is processing this checkout. Retry later.', true, session.sessionId);
     }
 
-    // Attempt to void any live payment links
-    if (session.razorpayPaymentLinkId) {
-      const razorpayClient = require('../lib/razorpayClient');
+    session._isProcessing = true;
+    session._processingIdempotencyKey = idempotencyKey;
+
+    try {
+      let nextSession;
       try {
-        await razorpayClient.cancelPaymentLink(session.razorpayPaymentLinkId);
+        nextSession = transitionSession(session, 'CANCELLED');
       } catch (err) {
-        // If it's already paid or cancelled on Razorpay's end, ignore the 400
-        const statusCode = err.statusCode || err.status;
-        if (statusCode !== 400) {
-          console.error('[Checkout] Failed to cancel payment link:', err);
+        if (err.name === 'InvalidStateTransitionError') {
+          return errorResponse(res, 409, 'INVALID_STATE_TRANSITION',
+            err.message, false, session.sessionId);
+        }
+        throw err;
+      }
+
+      // Attempt to void any live payment links (strict 2-phase commit)
+      if (session.razorpayPaymentLinkId) {
+        const razorpayClient = require('../lib/razorpayClient');
+        try {
+          await razorpayClient.cancelPaymentLink(session.razorpayPaymentLinkId);
+        } catch (err) {
+          // If it's already paid or cancelled on Razorpay's end, ignore the 400
+          const statusCode = err.statusCode || err.status;
+          if (statusCode !== 400) {
+            console.error('[Checkout] Failed to cancel payment link. Leaving local state intact:', err);
+            return errorResponse(res, 502, 'UPSTREAM_API_ERROR', 'Failed to cancel upstream payment link. Local state left intact.', true, session.sessionId);
+          }
         }
       }
+
+      // Safe to transition locally now
+      Object.assign(session, nextSession);
+
+      // Release velocity budget if a reservation was held
+      if (session.reservationId) {
+        const { releaseSpend } = require('../lib/velocityTracker');
+        releaseSpend(session.reservationPrincipalId, session.reservationId);
+        session.reservationId = null;
+        session.reservationPrincipalId = null;
+      }
+
+      const body = {
+        session_id: session.sessionId,
+        state: 'CANCELLED',
+        razorpay: {
+          order_id: session.razorpayOrderId,
+          status: session.razorpayOrderId || session.razorpayPaymentLinkId ? 'cancelled' : 'not_created',
+        },
+      };
+
+      recordCompletionResponse(session.sessionId, idempotencyKey, 200, body);
+      return res.json(body);
+
+    } finally {
+      session._isProcessing = false;
+      session._processingIdempotencyKey = null;
+      releaseCheckoutLock(session.sessionId, idempotencyKey);
     }
-
-    Object.assign(session, nextSession);
-
-
-    return res.json({
-      session_id: session.sessionId,
-      state: 'CANCELLED',
-      razorpay: {
-        order_id: session.razorpayOrderId,
-        status: session.razorpayOrderId || session.razorpayPaymentLinkId ? 'cancelled' : 'not_created',
-      },
-    });
   } catch (err) {
     console.error('[Checkout] Cancel session error:', err);
     return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to cancel checkout session');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// 6. GET RECOVERY OFFERS
+//    GET /api/v1/checkout/sessions/:id/recovery_offers
+// ═══════════════════════════════════════════════════════════════════════
+
+router.get('/sessions/:id/recovery_offers', (req, res) => {
+  try {
+    const session = sessions.get(req.params.id);
+
+    if (!session) {
+      return errorResponse(res, 404, 'SESSION_NOT_FOUND',
+        `No session with id ${req.params.id}`, false, req.params.id);
+    }
+
+    const db = require('../db');
+    const offers = db.prepare('SELECT * FROM recovery_offers WHERE cart_id = ?').all(session.sessionId);
+
+    return res.json({ offers });
+  } catch (err) {
+    console.error('[Checkout] Get recovery offers error:', err);
+    return errorResponse(res, 500, 'INTERNAL_ERROR', 'Failed to get recovery offers');
   }
 });
 
@@ -1328,12 +1484,35 @@ function sweepExpiredCarts() {
   const cutoff = Date.now() - 15 * 60 * 1000;
   const db = require('../db');
   const { generateRecoveryOffer } = require('../lib/recoveryAgent');
+  const { releaseSpend } = require('../lib/velocityTracker');
+  const razorpayClient = require('../lib/razorpayClient');
+
   for (const session of sessions.values()) {
     if (['CREATED', 'CONFIRMED'].includes(session.state)) {
       const updatedAt = new Date(session.updatedAt || session.createdAt).getTime();
       if (updatedAt < cutoff) {
         try {
+          // Attempt to void any live payment links to prevent webhook drops if paid late
+          if (session.razorpayPaymentLinkId) {
+            razorpayClient.cancelPaymentLink(session.razorpayPaymentLinkId).catch(err => {
+              const statusCode = err.statusCode || err.status;
+              if (statusCode !== 400) {
+                console.error('[Checkout] Failed to cancel payment link during expiry sweep:', err);
+              }
+            });
+          }
+
           Object.assign(session, transitionSession(session, 'EXPIRED'));
+          
+          if (session.reservationId && session.reservationPrincipalId) {
+            try {
+              releaseSpend(session.reservationPrincipalId, session.reservationId);
+            } catch (err) {
+              console.error('[Checkout] Failed to release velocity spend during sweep:', err);
+            }
+            session.reservationId = null;
+            session.reservationPrincipalId = null;
+          }
           
           if (session.cartMandate && session.cartMandate.claims && session.cartMandate.claims.line_items) {
             const recoveryItems = session.cartMandate.claims.line_items.map(li => ({

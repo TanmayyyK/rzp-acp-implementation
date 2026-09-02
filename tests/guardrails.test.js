@@ -77,9 +77,12 @@ describe('checkQuantityLimits', () => {
     ]);
   });
 
-  test('ignores items without a declared max_quantity_per_order', () => {
-    const d = checkQuantityLimits([{ sku: 'x', category: 'audio', quantity: 9999 }]);
-    expect(d.outcome).toBe('PASS');
+  test('applies fallback max_quantity_per_order of 10 for unconfigured items', () => {
+    const d = checkQuantityLimits([{ sku: 'x', category: 'audio', quantity: 11 }]);
+    expect(d.outcome).toBe('FAIL');
+    expect(d.detail.offending_items).toEqual([
+      { sku: 'x', quantity: 11, max_quantity_per_order: 10 },
+    ]);
   });
 });
 
@@ -186,7 +189,7 @@ describe('evaluateCartGuardrails (intent -> cart composite)', () => {
       resolvedItems: [AUDIO_ITEM, WEARABLE_ITEM],
     });
     expect(r.ok).toBe(true);
-    expect(r.decisions.map((d) => d.check)).toEqual(['category_allowlist', 'quantity']);
+    expect(r.decisions.map((d) => d.check)).toEqual(['category_allowlist', 'quantity', 'risk_tier']);
     expect(r.decisions.every((d) => d.outcome === 'PASS')).toBe(true);
   });
 
@@ -217,6 +220,7 @@ describe('error-code mapping + descriptions', () => {
       quantity: 'GUARDRAIL_QUANTITY_EXCEEDED',
       replay: 'NONCE_REPLAYED',
       velocity: 'GUARDRAIL_VELOCITY_EXCEEDED',
+      risk_tier: 'YIELD_TO_HUMAN',
     });
   });
 

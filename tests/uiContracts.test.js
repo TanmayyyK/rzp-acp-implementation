@@ -41,7 +41,7 @@ const post = async (url, body) => {
 };
 
 describe('UI contract: GET /api/v1/products (product feed)', () => {
-  it('returns { products:[...], count } with paise prices and the fields the feed reads', async () => {
+  it('returns { products:[...], count } with the narrow agent-facing fields only', async () => {
     const { statusCode, body } = await get('/api/v1/products');
     expect(statusCode).toBe(200);
     expect(Array.isArray(body.products)).toBe(true);
@@ -49,19 +49,28 @@ describe('UI contract: GET /api/v1/products (product feed)', () => {
     expect(body.products.length).toBeGreaterThan(0);
 
     const p = body.products[0];
-    expect(typeof p.id).toBe('string');
-    expect(typeof p.title).toBe('string');
-    expect(typeof p.price).toBe('number'); // paise (amountPaiseOf reads this)
-    expect(typeof p.currency).toBe('string');
-    expect(typeof p.availability).toBe('boolean');
-    expect(Array.isArray(p.images)).toBe(true);
-    expect(p.eligibility).toEqual(expect.objectContaining({ agent_purchasable: true }));
+    expect(typeof p.sku).toBe('string');
+    expect(typeof p.name).toBe('string');
+    expect(typeof p.price_inr).toBe('number'); // rupees; the merchant prices carts in paise itself
+    expect(typeof p.stock).toBe('number');
+
+    // Token truncation: enforcement inputs and unused columns never reach the LLM.
+    for (const field of ['risk_tier', 'max_quantity', 'max_quantity_per_order', 'item_type', 'description']) {
+      expect(p).not.toHaveProperty(field);
+    }
+    expect(Object.keys(p).sort()).toEqual(['name', 'price_inr', 'sku', 'stock']);
+  });
+
+  it('caps the result set at 15 rows so a broad search cannot flood the context window', async () => {
+    const { statusCode, body } = await get('/api/v1/products');
+    expect(statusCode).toBe(200);
+    expect(body.products.length).toBeLessThanOrEqual(15);
   });
 
   it('honors the max_price (paise) filter', async () => {
     const { statusCode, body } = await get('/api/v1/products?max_price=200000');
     expect(statusCode).toBe(200);
-    for (const p of body.products) expect(p.price).toBeLessThanOrEqual(200000);
+    for (const p of body.products) expect(p.price_inr * 100).toBeLessThanOrEqual(200000);
   });
 });
 

@@ -1,7 +1,6 @@
-# Architecture — Agentic Commerce & Agent Circle Trust Engine
+# Architecture: Agentic Commerce Platform
 
-> **Authoritative Technical Blueprint — Version 2.0 (2026-08-31)**  
-> Multi-Protocol Agentic Commerce (ACP + AP2 + x402) on Razorpay Rails, secured by the Agent Circle Trust Engine, FIDO2 WebAuthn Passkeys, Server-Side Sliding-Window Velocity Guardrails, and a Tamper-Evident Hash-Chained Audit Log.
+> Agentic Commerce Protocol (ACP) and AP2 mandates on Razorpay Rails, secured by the Agent Circle Trust Engine, FIDO2 WebAuthn Passkeys, Server-Side Sliding-Window Velocity Guardrails, and a Tamper-Evident Hash-Chained Audit Log.
 
 ---
 
@@ -14,16 +13,16 @@ flowchart TD
   subgraph BuyerPlane["Buyer & Agent Plane"]
     Human["Human Principal<br/>(FIDO2 / WebAuthn Passkey)"]
     Agent["Buyer Agent<br/>(LLM Reasoning Loop)"]
-    MCPClient["MCP Client / x402 Client"]
+    MCPClient["MCP Client / RETIRED_X402 Client"]
     Human -->|"Delegates Bounded Authority (Full / Partial)"| Agent
     Human -.->|"WebAuthn Biometric Ceremony"| WebAuthnRoute
-    Agent -->|"Calls MCP Tools / x402 Handshake"| MCPClient
+    Agent -->|"Calls MCP Tools / RETIRED_X402 Handshake"| MCPClient
   end
 
   subgraph IngressAdapters["Multi-Protocol Ingress & Adapters"]
     ACPRoute["ACP REST Endpoints<br/>/api/v1/checkout/sessions"]
     AP2Validator["AP2 Mandate Validator<br/>(JCS-Ed25519 W3C VC Chain)"]
-    x402Adapter["x402 Protocol Adapter<br/>(generateChallenge / translateToInternalMandate)"]
+    RETIRED_X402Adapter["RETIRED_X402 Protocol Adapter<br/>(generateChallenge / translateToInternalMandate)"]
     WebAuthnRoute["WebAuthn Auth Routes<br/>/auth/register & /auth/login"]
     UserBudgetRoute["User Policy Route<br/>/user/budget"]
   end
@@ -38,7 +37,7 @@ flowchart TD
   subgraph CoreServices["Checkout Core & State Machine"]
     SMM["Session State Machine<br/>CREATED ➔ CONFIRMED ➔ PAID"]
     SweepCarts["Cart Expiry Sweeper<br/>(sweepExpiredCarts 15m Window)"]
-    RecoveryAgent["Recovery Agent<br/>(Mandate-Compliant Upsell & Discount Offers)"]
+    RecoveryAgent["Automated Cart Sweeper<br/>(Mandate-Compliant Upsell & Discount Offers)"]
   end
 
   subgraph RailsAndPersistence["Settlement Rails & Persistence"]
@@ -50,8 +49,8 @@ flowchart TD
   end
 
   MCPClient -->|"X-Agorio-Attestation + Mandates"| ACPRoute
-  MCPClient -->|"HTTP 402 Handshake"| x402Adapter
-  x402Adapter -->|"Translated Cart/Payment Mandates"| AP2Validator
+  MCPClient -->|"HTTP 402 Handshake"| RETIRED_X402Adapter
+  RETIRED_X402Adapter -->|"Translated Cart/Payment Mandates"| AP2Validator
   ACPRoute --> AP2Validator
   AP2Validator --> Delegation
   Delegation --> BudgetEnforcer
@@ -76,17 +75,17 @@ flowchart TD
 1. **Authoritative Minor Units (Paise)**: All monetary values are strictly represented as integers in minor currency units (paise; ₹1.00 = `100` paise). Floating-point currency arithmetic is strictly prohibited across all modules.
 2. **Strict Liability Keying**: Spending caps, velocity tracking, and WebAuthn sessions are strictly keyed to the liable human `principal_id` (`usr_alice`), never to transient `agent_id`, `intent_id`, or `session_id`.
 3. **Drop Agent-Supplied Budget Limits**: The server unilaterally drops any client/agent-supplied budget parameters (`budget_in_rupees`), enforcing the authoritative ceiling stored in SQLite (`users.budget_cap_paise`) and appending an `IGNORED_AGENT_SUPPLIED_LIMIT` audit block.
-4. **Deterministic Mandate Hashing**: All AP2 and x402 mandates use canonical JSON serialization (RFC 8785 / JCS) with detached Ed25519 signatures (`eddsa-jcs-2022`).
+4. **Deterministic Mandate Hashing**: All AP2 and RETIRED_X402 mandates use canonical JSON serialization (RFC 8785 / JCS) with detached Ed25519 signatures (`eddsa-jcs-2022`).
 5. **Tamper-Evident Audit Trail**: Every money movement, guardrail evaluation, webhook event, and security exception appends to an immutable, linear SHA-256 hash chain with (O(n)) `verifyChain()` proof verification.
 
 ---
 
 ## 3. Protocol Adapters & Ingress Layer
 
-### 3.1 x402 Adapter (`src/adapters/x402Adapter.js`)
+### 3.1 RETIRED_X402 Adapter (`src/adapters/RETIRED_X402Adapter.js`)
 Enables zero-friction HTTP 402 Payment Required handshakes for Web3 and autonomous AI agent micro-settlements:
-- **`generateChallenge(cartAmount, address, options)`**: Produces a standard x402 challenge payload specifying payment address, network (`base`), amount in paise, unique challenge ID, and cryptographic nonce.
-- **`translateToInternalMandate(x402PaymentPayload, principalId, context)`**: Ingests inbound x402 transaction receipts/proofs and translates them directly into canonical `CartMandate` and `PaymentMandate` objects acceptable to the Trust Engine.
+- **`generateChallenge(cartAmount, address, options)`**: Produces a standard RETIRED_X402 challenge payload specifying payment address, network (`base`), amount in paise, unique challenge ID, and cryptographic nonce.
+- **`translateToInternalMandate(RETIRED_X402PaymentPayload, principalId, context)`**: Ingests inbound RETIRED_X402 transaction receipts/proofs and translates them directly into canonical `CartMandate` and `PaymentMandate` objects acceptable to the Trust Engine.
 
 ### 3.2 AP2 Mandate Chain (`schemas/validate.js`, `src/lib/jcs-eddsa.js`)
 Implements the 3-tier W3C Verifiable Credential mandate chain:
@@ -153,7 +152,7 @@ Controls autonomous agent spend authority:
 - **State Transition Guard**: All state mutations pass through `transitionSession(session, nextState)`, which strictly validates legal transitions and updates `updatedAt`.
 - **Concurrency Isolation**: Employs `session._isProcessing` lock to prevent race conditions during parallel completion attempts.
 
-### 5.2 Cart Expiry Sweeper & Recovery Agent (`src/lib/recoveryAgent.js`)
+### 5.2 Cart Expiry Sweeper & Automated Cart Sweeper (`src/lib/recoveryAgent.js`)
 - Periodic sweeper (`sweepExpiredCarts`, running every 60s) scans for `CREATED` / `CONFIRMED` sessions inactive for > 15 minutes.
 - Transitions abandoned sessions to `EXPIRED`.
 - Automatically executes `generateRecoveryOffer(cartId, lineItems, offerPolicy)` to compute a mandate-compliant discount/upsell.
@@ -209,4 +208,4 @@ The architecture is continuously validated against the core adversarial attack v
 1. **Attack 1 (Budget Override Injection)**: Prompt injection attempts to smuggle arbitrary budget caps via LLM metadata. Verified immune via server-side SQLite cap enforcement and `IGNORED_AGENT_SUPPLIED_LIMIT` audit logging.
 2. **Attack 2 (Velocity Bypass via Intent Spam)**: Rapid sequential creation of new intents with high ticket quantities. Verified immune via `principal_id` sliding-window aggregation triggering `HTTP 403 GUARDRAIL_VELOCITY_EXCEEDED`.
 3. **Attack 3 (Authorization Boundary Bypass)**: Direct API completion attempts with valid Agent attestation tokens but missing human WebAuthn credentials. Verified rejected with `HTTP 401 Unauthorized`.
-4. **Attack 4 (x402 Signature Forgery)**: Forged or empty cryptographic signatures on the Multi-Protocol Gateway (`POST /x402/submit`). Verified immune via rigorous `InvalidProtocolError` bounds checks triggering `HTTP 400` and logging `GUARDRAIL_BLOCKED`.
+4. **Attack 4 (RETIRED_X402 Signature Forgery)**: Forged or empty cryptographic signatures on the Multi-Protocol Gateway (`POST /RETIRED_X402/submit`). Verified immune via rigorous `InvalidProtocolError` bounds checks triggering `HTTP 400` and logging `GUARDRAIL_BLOCKED`.

@@ -23,6 +23,7 @@ beforeAll(() => {
 
 const app = require('../src/server');
 const checkoutRouter = require('../src/routes/checkout');
+const { signRequest: signAgentRequest } = require('../src/lib/agentSignature');
 const { reserveSpend, checkVelocity } = require('../src/lib/velocityTracker');
 
 function signBody(body, secret) {
@@ -94,9 +95,14 @@ describe('Products API', () => {
     const res = await get('/api/v1/products?category=audio');
     expect(res.status).toBe(200);
     expect(res.body.products.length).toBeGreaterThan(0);
-    res.body.products.forEach((p) => {
-      expect(p.category).toBe('audio');
-    });
+    // `category` is a filter input, not a response field: the row is deliberately
+    // stripped to { sku, name, price_inr, stock } before it reaches the LLM, so
+    // the filter is proved by which SKUs come back, not by echoing the category.
+    const audioSkus = res.body.products.map((p) => p.sku);
+    expect(audioSkus).toContain('sony-wh-1000xm5-wireless-noise-cancelling-headphones');
+    for (const p of res.body.products) {
+      expect(Object.keys(p).sort()).toEqual(['name', 'price_inr', 'sku', 'stock']);
+    }
   });
 
   test('GET /api/v1/products?max_price=300000 filters by price', async () => {
@@ -104,15 +110,31 @@ describe('Products API', () => {
     expect(res.status).toBe(200);
     expect(res.body.products.length).toBeGreaterThan(0);
     res.body.products.forEach((p) => {
-      expect(p.price).toBeLessThanOrEqual(300000);
+      expect(p.price_inr * 100).toBeLessThanOrEqual(300000);
     });
   });
 
-  test('GET /api/v1/products/:sku returns a single product', async () => {
-    const res = await get('/api/v1/products/prod_elec_002');
+  test('GET /api/v1/products caps the feed at 15 rows', async () => {
+    const res = await get('/api/v1/products');
     expect(res.status).toBe(200);
-    expect(res.body.sku).toBe('prod_elec_002');
-    expect(res.body.id).toBe('prod_elec_002');
+    expect(res.body.products.length).toBeLessThanOrEqual(15);
+  });
+
+  test('GET /api/v1/products never leaks risk_tier / max_quantity / item_type', async () => {
+    const res = await get('/api/v1/products');
+    expect(res.status).toBe(200);
+    for (const p of res.body.products) {
+      expect(p).not.toHaveProperty('risk_tier');
+      expect(p).not.toHaveProperty('max_quantity_per_order');
+      expect(p).not.toHaveProperty('item_type');
+    }
+  });
+
+  test('GET /api/v1/products/:sku returns a single product', async () => {
+    const res = await get('/api/v1/products/groq-llama3-70b-1m');
+    expect(res.status).toBe(200);
+    expect(res.body.sku).toBe('groq-llama3-70b-1m');
+    expect(res.body.id).toBe('groq-llama3-70b-1m');
     expect(Number.isInteger(res.body.price)).toBe(true);
   });
 
@@ -227,9 +249,26 @@ describe('Webhook signature verification', () => {
 // ===================== Checkout idempotency =====================
 
 describe('Checkout session lifecycle', () => {
+  function signRequest(method, url, attestationObj, body = {}) {
+    // Ed25519 agent signature (server verifies with AGENT_PUBLIC_KEY).
+    return signAgentRequest({
+      method,
+      path: url,
+      agentId: attestationObj.agent_id,
+      principalId: attestationObj.principal_id,
+      body,
+      privateKey: process.env.AGENT_PRIVATE_KEY,
+    });
+  }
+
   test('POST /complete without Idempotency-Key -> 400', async () => {
-    const res = await post('/api/v1/checkout/sessions/fake_id/complete', {
-      headers: { 'X-Agorio-Attestation': 'eyJhZ2VudF9pZCI6InRlc3QiLCJwcmluY2lwYWxfaWQiOiJ0ZXN0In0=' },
+    const attObj = { agent_id: 'test', principal_id: 'test' };
+    const url = '/api/v1/checkout/sessions/fake_id/complete';
+    const res = await post(url, {
+      headers: {
+        'X-Agorio-Attestation': Buffer.from(JSON.stringify(attObj)).toString('base64'),
+        'X-Agorio-Signature': signRequest('POST', url, attObj, {})
+      },
       body: {}
     });
     expect(res.status).toBe(400);
@@ -237,8 +276,14 @@ describe('Checkout session lifecycle', () => {
   });
 
   test('POST /complete with Idempotency-Key but fake session -> 404', async () => {
-    const res = await post('/api/v1/checkout/sessions/fake_id/complete', {
-      headers: { 'Idempotency-Key': 'idem_fake', 'X-Agorio-Attestation': 'eyJhZ2VudF9pZCI6InRlc3QiLCJwcmluY2lwYWxfaWQiOiJ0ZXN0In0=' },
+    const attObj = { agent_id: 'test', principal_id: 'test' };
+    const url = '/api/v1/checkout/sessions/fake_id/complete';
+    const res = await post(url, {
+      headers: {
+        'Idempotency-Key': 'idem_fake',
+        'X-Agorio-Attestation': Buffer.from(JSON.stringify(attObj)).toString('base64'),
+        'X-Agorio-Signature': signRequest('POST', url, attObj, {})
+      },
       body: {},
     });
     expect(res.status).toBe(404);

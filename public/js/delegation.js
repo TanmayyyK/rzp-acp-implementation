@@ -127,8 +127,10 @@
   // ─── Ceremony 3: delegate spending authority to the agent ────────────────
 
   function delegate() {
+    // Capture the value NOW, before guard() calls render() which wipes the DOM
+    // and recreates the input with its default value="10000".
+    var rupees = Number(els.capInput && els.capInput.value);
     return guard(async function () {
-      var rupees = Number(els.capInput && els.capInput.value);
       if (!isFinite(rupees) || rupees <= 0) {
         return say('Enter a spending limit in rupees.', 'danger');
       }
@@ -257,8 +259,8 @@
     }
 
     if (!state.authenticated) {
-      html += button('sec-register', 'Register device');
-      html += button('sec-auth', 'Authenticate', { primary: true });
+      html += button('sec-register', 'Register device', { primary: true });
+      html += button('sec-auth', 'Authenticate');
     } else {
       html += '<div style="font-size: 0.8rem; color: var(--color-success, #10b981); font-weight: 600; text-align: center;">'
         + 'Human authenticated - ' + state.principalId + '</div>';
@@ -275,10 +277,6 @@
           + ' style="width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 6px;'
           + ' border: 1px solid var(--color-border, #d4d4d8); background: transparent;'
           + ' color: inherit; font-size: 0.85rem;" /></label>';
-        if (state.accountCapPaise) {
-          html += '<div style="font-size: 0.72rem; opacity: 0.6;">Account ceiling '
-            + paise(state.accountCapPaise) + '</div>';
-        }
         html += button('sec-delegate', 'Delegate spending', { primary: true });
       }
 

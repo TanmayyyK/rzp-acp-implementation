@@ -102,26 +102,26 @@ function makeFetch(handler) {
   return fetchImpl;
 }
 
-// Feed shaped like GET /api/v1/feed (price is in paise; no category field).
+// Feed shaped like GET /api/v1/products: the narrow, token-truncated,
+// rupee-denominated row the route now returns to the agent.
 const FEED = {
-  version: '2.0',
-  protocol: 'ACP',
   products: [
-    { id: 'prod_electronics_001', title: 'Boult Audio Z40 Earbuds', description: 'wireless earbuds', price: 179900, currency: 'INR', availability: true },
-    { id: 'prod_electronics_002', title: 'Mi Power Bank 3i', description: 'power bank 20000mAh', price: 199900, currency: 'INR', availability: true },
-    { id: 'prod_electronics_003', title: 'Noise Smartwatch', description: 'colorfit smartwatch', price: 249900, currency: 'INR', availability: false },
+    { sku: 'prod_electronics_001', name: 'Boult Audio Z40 Earbuds', price_inr: 1799, stock: 12 },
+    { sku: 'prod_electronics_002', name: 'Mi Power Bank 3i', price_inr: 1999, stock: 40 },
+    { sku: 'prod_electronics_003', name: 'Noise Smartwatch', price_inr: 2499, stock: 0 },
   ],
   count: 3,
 };
 
 describe('TOOL_DEFINITIONS (air-gap surface)', () => {
-  test('exposes exactly the 6 ACP checkout tools (5 spec + update_cart deviation)', () => {
+  test('exposes exactly the 7 ACP checkout tools (5 spec + update_cart + get_recovery_offers deviation)', () => {
     const names = TOOL_DEFINITIONS.map((t) => t.name).sort();
     expect(names).toEqual([
       'cancel_checkout',
       'complete_checkout',
       'create_cart',
       'get_cart_state',
+      'get_recovery_offers',
       'search_catalog',
       'update_cart',
     ]);
@@ -198,35 +198,56 @@ describe('canonicalize + sign (transport crypto — the shared jcs-hmac module)'
 describe('paise conversion (Paise Converter air-gap)', () => {
   test('search_catalog: budget_in_rupees is applied as *100 paise, plus availability', async () => {
     const filteredFeed = {
-      ...FEED,
-      products: FEED.products.filter(p => p.price <= 180000 && p.availability),
-      count: 1
+      products: FEED.products.filter((p) => p.price_inr <= 1800 && p.stock > 0),
+      count: 1,
     };
     const fetchImpl = makeFetch(() => jsonResponse(200, filteredFeed));
     const tools = createMerchantTools({ baseUrl: BASE, fetchImpl, secret: SECRET });
 
-    // 1800 rupees = 180000 paise: only prod_001 (179900, available) qualifies.
-    const out = await tools.search_catalog({ budget_in_rupees: 1800 });
+    // 1800 rupees = 180000 paise: only prod_001 (₹1799, in stock) qualifies.
+    const out = await tools.search_catalog({ query: 'earbuds', budget_in_rupees: 1800 });
     expect(out.count).toBe(1);
     expect(out.products[0].item_id).toBe('prod_electronics_001');
-    expect(out.products[0].price_in_paise).toBe(179900);
     expect(out.products[0].price_in_rupees).toBe(1799);
+    // Paise never crosses back to the agent — the merchant prices the cart.
+    expect(out.products[0]).not.toHaveProperty('price_in_paise');
 
-    expect(fetchImpl.calls[0].url).toBe(BASE + '/api/v1/products?max_price=180000');
+    expect(fetchImpl.calls[0].url).toBe(BASE + '/api/v1/products?query=earbuds&max_price=180000');
     expect(fetchImpl.calls[0].method).toBe('GET');
+  });
+
+  test('search_catalog: rejects an empty/missing query before any merchant call', async () => {
+    const fetchImpl = makeFetch(() => jsonResponse(200, FEED));
+    const tools = createMerchantTools({ baseUrl: BASE, fetchImpl, secret: SECRET });
+
+    await expect(tools.search_catalog({})).rejects.toThrow(/query. is required/);
+    await expect(tools.search_catalog({ query: '   ' })).rejects.toThrow(/query. is required/);
+    expect(fetchImpl.calls).toHaveLength(0); // no wasted round trip
+  });
+
+  test('search_catalog: forwards category and advises refinement on no matches', async () => {
+    const fetchImpl = makeFetch(() => jsonResponse(200, { products: [], count: 0 }));
+    const tools = createMerchantTools({ baseUrl: BASE, fetchImpl, secret: SECRET });
+
+    const out = await tools.search_catalog({ query: 'ergonomic chair', category: 'furniture' });
+    expect(out.count).toBe(0);
+    expect(out.advice).toMatch(/[Rr]efine/);
+    expect(fetchImpl.calls[0].url).toBe(
+      BASE + '/api/v1/products?query=ergonomic+chair&category=furniture'
+    );
   });
 
   test('search_catalog: query filters by title/description substring', async () => {
     const filteredFeed = {
-      ...FEED,
-      products: FEED.products.filter(p => p.title.toLowerCase().includes('power bank')),
-      count: 1
+      products: FEED.products.filter((p) => p.name.toLowerCase().includes('power bank')),
+      count: 1,
     };
     const fetchImpl = makeFetch(() => jsonResponse(200, filteredFeed));
     const tools = createMerchantTools({ baseUrl: BASE, fetchImpl, secret: SECRET });
     const out = await tools.search_catalog({ query: 'power bank' });
     expect(out.count).toBe(1);
     expect(out.products[0].item_id).toBe('prod_electronics_002');
+    expect(out.products[0].title).toBe('Mi Power Bank 3i');
   });
 
   test('create_cart: references the human-signed grant and ignores an agent-supplied budget', async () => {
@@ -606,7 +627,7 @@ describe('audit tap (ADR-005 — every tool execution appends one TOOL_CALL bloc
     const fetchImpl = makeFetch(() => jsonResponse(200, FEED));
     const tools = createMerchantTools({ baseUrl: BASE, fetchImpl, secret: SECRET, auditLog });
 
-    const input = { budget_in_rupees: 1800 };
+    const input = { query: 'earbuds', budget_in_rupees: 1800 };
     const output = await tools.search_catalog(input);
 
     const entries = auditLog.entries();

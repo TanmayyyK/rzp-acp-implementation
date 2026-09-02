@@ -71,6 +71,21 @@
         </button>
         <span class="topbar-title">Razorpay Agent</span>
         <div class="topbar-actions">
+          <div class="cart-dropdown-container">
+            <button class="topbar-btn" id="cart-btn" type="button" aria-label="View Cart">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+              <span class="topbar-btn-label">Cart (<span id="cart-count">0</span>)</span>
+            </button>
+            <div class="cart-dropdown hidden" id="cart-dropdown">
+              <div class="cart-dropdown-header">
+                <strong>Current Cart</strong>
+                <span id="cart-dropdown-total">₹0.00</span>
+              </div>
+              <ul class="cart-dropdown-list" id="cart-dropdown-list">
+                <li class="cart-empty-msg">Your cart is empty</li>
+              </ul>
+            </div>
+          </div>
           <button class="topbar-btn" id="shortcuts-btn" type="button" aria-label="Keyboard shortcuts">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
             <span class="topbar-btn-label">Shortcuts</span>
@@ -121,25 +136,55 @@
         sidebar.classList.toggle('is-collapsed');
       });
 
+      var chatSessions = [];
+      
+      window.onChatUpdated = function() {
+        saveChatToHistory();
+      };
+
       // New chat
       document.getElementById('new-chat-btn').addEventListener('click', function () {
         saveChatToHistory();
-        window.ChatPanel.reset();
+        window.ChatPanel.init(document.getElementById('chat-region'), []);
       });
 
       // Chat history
       function saveChatToHistory() {
-        var historyEl = document.getElementById('chat-history');
-        var msgs = document.querySelectorAll('.bubble-text');
-        if (msgs.length === 0) return;
-        var firstMsg = msgs[0].textContent.slice(0, 38);
+        var currentHistory = window.ChatPanel.getHistory();
+        if (!currentHistory || currentHistory.length === 0) return;
+        
+        // Find if this session is already saved
+        var existing = chatSessions.find(function(s) { return s.history === currentHistory; });
+        if (existing) return; // already saved
+
+        var firstMsg = currentHistory[0].content || currentHistory[0].message || '';
         if (!firstMsg.trim()) return;
-        var item = document.createElement('button');
-        item.className = 'sidebar-history-item';
-        item.textContent = firstMsg + (firstMsg.length >= 38 ? '...' : '');
-        item.title = firstMsg;
-        historyEl.insertBefore(item, historyEl.firstChild);
+        var title = firstMsg.slice(0, 38) + (firstMsg.length >= 38 ? '...' : '');
+        
+        var session = { id: Date.now(), title: title, history: currentHistory };
+        chatSessions.push(session);
+        renderChatHistory();
       }
+
+      function renderChatHistory() {
+        var historyEl = document.getElementById('chat-history');
+        historyEl.innerHTML = ''; // clear current items
+        
+        // Render in reverse chronological order
+        var sorted = chatSessions.slice().reverse();
+        sorted.forEach(function(session) {
+          var item = document.createElement('button');
+          item.className = 'sidebar-history-item';
+          item.textContent = session.title;
+          item.title = session.title;
+          item.addEventListener('click', function() {
+            saveChatToHistory(); // save current chat before switching
+            window.ChatPanel.init(document.getElementById('chat-region'), session.history);
+          });
+          historyEl.appendChild(item);
+        });
+      }
+
     });
   </script>
 </body>

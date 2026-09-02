@@ -37,6 +37,7 @@ const crypto = require('crypto');
 const app = require('../src/server');
 const db = require('../src/db');
 const checkoutRouter = require('../src/routes/checkout');
+const { signRequest: signAgentRequest } = require('../src/lib/agentSignature');
 const { createMerchantTools } = require('../src/mcp/merchantClient');
 const { resetLedger } = require('../src/lib/velocityTracker');
 const { sharedAuditLog } = require('../src/lib/auditLog');
@@ -47,18 +48,31 @@ const PRINCIPAL = 'usr_alice';
 const AGENT_ID = 'buyer_agent_1';
 const CAP_PAISE = 1000000; // ₹10,000
 
-// prod_elec_001 = ₹2,499 (under cap) · prod_elec_005 = ₹29,990 (over cap)
-const UNDER_CAP_SKU = 'prod_elec_001';
-const OVER_CAP_SKU = 'prod_elec_005';
+// nothing-ear-a = ₹7,999 (under the ₹10,000 cap) · sony-wh-1000xm5 = ₹29,990 (over it)
+const UNDER_CAP_SKU = 'nothing-ear-a-wireless-earbuds';
+const OVER_CAP_SKU = 'sony-wh-1000xm5-wireless-noise-cancelling-headphones';
 
-/** The ADR-008 attestation header: identity, deliberately not authority. */
-function attestationHeader(agentId = AGENT_ID, principalId = PRINCIPAL) {
-  return Buffer.from(JSON.stringify({ agent_id: agentId, principal_id: principalId })).toString('base64');
-}
 
-function agentHeaders(extra = {}) {
-  // No Cookie. That absence is the point of claim (3).
-  return { 'X-Agorio-Attestation': attestationHeader(), ...extra };
+function agentHeaders(method = 'GET', url = '/', body = null, extra = {}) {
+  const attestationObj = { agent_id: AGENT_ID, principal_id: PRINCIPAL };
+  const attestation = Buffer.from(JSON.stringify(attestationObj)).toString('base64');
+  
+  // Sign with the agent's Ed25519 private key; the server verifies with the
+  // public half. The signed payload binds method/path/agent/principal/body.
+  const signatureHeader = signAgentRequest({
+    method,
+    path: url,
+    agentId: attestationObj.agent_id,
+    principalId: attestationObj.principal_id,
+    body,
+    privateKey: process.env.AGENT_PRIVATE_KEY,
+  });
+
+  return { 
+    'X-Agorio-Attestation': attestation,
+    'X-Agorio-Signature': signatureHeader,
+    ...extra 
+  };
 }
 
 let authenticator;
@@ -104,7 +118,7 @@ async function agentCreatesCart(grantId, sku, quantity = 1) {
   return inject(app, {
     method: 'POST',
     url: '/api/v1/checkout/sessions',
-    headers: agentHeaders(),
+    headers: agentHeaders('POST', '/api/v1/checkout/sessions', { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] }),
     body: { intent_mandate_id: grantId, requested_items: [{ sku, quantity }] },
   });
 }
@@ -113,7 +127,7 @@ async function agentCompletes(sessionId, body = {}) {
   return inject(app, {
     method: 'POST',
     url: `/api/v1/checkout/sessions/${sessionId}/complete`,
-    headers: agentHeaders({ 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
+    headers: agentHeaders('POST', `/api/v1/checkout/sessions/${sessionId}/complete`, body, { 'Idempotency-Key': `idem_${crypto.randomBytes(6).toString('hex')}` }),
     body,
   });
 }
@@ -191,19 +205,20 @@ describe('the server holds no human or buyer signing key', () => {
 
 describe('an agent cannot authorize its own spending', () => {
   test('a self-supplied intent_mandate is refused, not silently ignored', async () => {
+    const bodyPayload = {
+      intent_mandate: {
+        mandate_id: 'man_int_self_minted',
+        type: 'IntentMandate',
+        claims: { principal: PRINCIPAL, agent: AGENT_ID, constraints: { max_amount: 99999999 } },
+      },
+      intent_mandate_id: 'man_int_self_minted',
+      requested_items: [{ sku: UNDER_CAP_SKU, quantity: 1 }],
+    };
     const res = await inject(app, {
       method: 'POST',
       url: '/api/v1/checkout/sessions',
-      headers: agentHeaders(),
-      body: {
-        intent_mandate: {
-          mandate_id: 'man_int_self_minted',
-          type: 'IntentMandate',
-          claims: { principal: PRINCIPAL, agent: AGENT_ID, constraints: { max_amount: 99999999 } },
-        },
-        intent_mandate_id: 'man_int_self_minted',
-        requested_items: [{ sku: UNDER_CAP_SKU, quantity: 1 }],
-      },
+      headers: agentHeaders('POST', '/api/v1/checkout/sessions', bodyPayload),
+      body: bodyPayload,
     });
 
     expect(res.status).toBe(400);
@@ -384,10 +399,26 @@ describe('autonomous checkout works without a human session cookie', () => {
     const res = await inject(app, {
       method: 'POST',
       url: `/api/v1/checkout/sessions/${cart.body.session_id}/complete`,
-      headers: {
-        'X-Agorio-Attestation': attestationHeader(AGENT_ID, 'usr_bob'),
-        'Idempotency-Key': 'idem_wrong_principal',
-      },
+      headers: (() => {
+        const urlPath = `/api/v1/checkout/sessions/${cart.body.session_id}/complete`;
+        const attObj = { agent_id: AGENT_ID, principal_id: 'usr_bob' };
+        const att = Buffer.from(JSON.stringify(attObj)).toString('base64');
+        // A cryptographically VALID signature whose attested principal (usr_bob)
+        // does not match the session's principal — it must clear signature
+        // verification and be refused downstream with ATTESTATION_MISMATCH.
+        return {
+          'X-Agorio-Attestation': att,
+          'X-Agorio-Signature': signAgentRequest({
+            method: 'POST',
+            path: urlPath,
+            agentId: attObj.agent_id,
+            principalId: attObj.principal_id,
+            body: {},
+            privateKey: process.env.AGENT_PRIVATE_KEY,
+          }),
+          'Idempotency-Key': 'idem_wrong_principal',
+        };
+      })(),
       body: {},
     });
 

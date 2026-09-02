@@ -20,11 +20,14 @@
  */
 
 const crypto = require('crypto');
+const { EventEmitter } = require('events');
 const { canonicalize } = require('../../jcs-hmac');
 const db = require('../db');
 
 /** Genesis link: the prev_hash of the very first entry. */
 const GENESIS_PREV_HASH = '0'.repeat(64);
+
+const auditEmitter = new EventEmitter();
 
 /** Event types and actors, per ARCHITECTURE.md §2.6. Frozen for safe reuse. */
 const EventType = Object.freeze({
@@ -146,6 +149,7 @@ function createPersistentAuditLog() {
     entry.hash = computeHash(entry);
     db.prepare('INSERT INTO audit_events (seq, entry_json, created_at) VALUES (?, ?, ?)')
       .run(entry.seq, JSON.stringify(entry), entry.timestamp);
+    auditEmitter.emit('new_block', entry);
     return entry;
   });
 
@@ -197,6 +201,7 @@ module.exports = {
   createAuditLog,
   createPersistentAuditLog,
   sharedAuditLog,
+  auditEmitter,
   computeHash,
   GENESIS_PREV_HASH,
   EventType,

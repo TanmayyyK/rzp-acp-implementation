@@ -462,22 +462,16 @@ button { font: inherit; }
 }
 .composer-input::placeholder { color: var(--text-3); }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.composer-budget {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 6px 12px; border-radius: 16px;
   background: var(--surface-2); border: 1px solid transparent;
   color: var(--text-2); font-size: 13px; font-weight: 500;
   transition: all .2s var(--ease);
 }
-.composer-budget:hover { background: var(--surface-3); }
-.composer-budget-sym { color: var(--text-3); }
-.composer-budget-input {
   width: 60px; border: none; outline: none; background: transparent;
   color: var(--text); font-family: inherit; font-size: 13px; font-weight: 500;
   -moz-appearance: textfield;
 }
-.composer-budget-input::-webkit-outer-spin-button,
-.composer-budget-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 
 
@@ -1054,4 +1048,85 @@ body.drawer-open { overflow: hidden; }
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
   border-radius: 6px;
+}
+
+/* ── Cart Dropdown ─────────────────────────────────────────────────────── */
+.cart-dropdown-container {
+  position: relative;
+  display: inline-block;
+  margin-right: 12px;
+}
+.cart-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: 320px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  z-index: 100;
+  overflow: hidden;
+  transition: opacity 0.2s, transform 0.2s;
+  transform-origin: top right;
+}
+.cart-dropdown.hidden {
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
+}
+.cart-dropdown-header {
+  padding: 12px 16px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.cart-dropdown-header strong {
+  color: var(--text);
+  font-weight: 600;
+}
+#cart-dropdown-total {
+  font-family: 'Geist Mono', monospace;
+  font-weight: 600;
+  color: var(--primary);
+}
+.cart-dropdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cart-dropdown-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 13px;
+}
+.cart-dropdown-item:last-child {
+  border-bottom: none;
+}
+.cart-item-name {
+  color: var(--text);
+  margin-right: 12px;
+  line-height: 1.4;
+  flex: 1;
+}
+.cart-item-price {
+  font-family: 'Geist Mono', monospace;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.cart-empty-msg {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-style: italic;
 }

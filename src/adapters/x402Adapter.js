@@ -158,7 +158,7 @@ function generateChallenge(cartAmount, address) {
  * @throws {TypeError} on a non-object payload, missing principal, or a floating-point amount
  * @throws {InvalidProtocolError} when the required cryptographic fields (signature, nonce) are absent
  */
-function translateToInternalMandate(x402PaymentPayload, principalId) {
+function translateToInternalMandate(x402PaymentPayload, principalId, clientPublicKeyPem = process.env.CLIENT_PUBLIC_KEY) {
   if (x402PaymentPayload === null || typeof x402PaymentPayload !== 'object' || Array.isArray(x402PaymentPayload)) {
     throw new TypeError('x402PaymentPayload must be an object');
   }
@@ -178,6 +178,40 @@ function translateToInternalMandate(x402PaymentPayload, principalId) {
   }
   if (typeof nonce !== 'string' || nonce.trim() === '') {
     throw new InvalidProtocolError('x402 payload missing required cryptographic field: nonce');
+  }
+
+  const { signature: _sig, ...payloadWithoutSig } = x402PaymentPayload;
+  const canonical = require('../../jcs-hmac').canonicalize(payloadWithoutSig);
+  const [headerB64, sigB64] = signature.split('..');
+  
+  let header;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+  } catch (_err) {
+    throw new InvalidProtocolError('x402 signature header is malformed');
+  }
+
+  let hashAlg = 'SHA256';
+  if (header.alg === 'ES384') hashAlg = 'SHA384';
+  if (header.alg === 'ES512') hashAlg = 'SHA512';
+  if (header.alg === 'EdDSA') hashAlg = null;
+
+  if (!clientPublicKeyPem) {
+    throw new Error('Server missing registered client public key for x402 verification');
+  }
+
+  const crypto = require('crypto');
+  let isValid = false;
+  try {
+    const publicKey = crypto.createPublicKey(clientPublicKeyPem);
+    const sigBuffer = Buffer.from(sigB64, 'base64url');
+    isValid = crypto.verify(hashAlg, Buffer.from(canonical, 'utf8'), publicKey, sigBuffer);
+  } catch (_err) {
+    isValid = false;
+  }
+
+  if (!isValid) {
+    throw new InvalidProtocolError('x402 signature is mathematically invalid');
   }
 
   const totalPaise = assertIntegerPaise(x402PaymentPayload.amount, 'x402PaymentPayload.amount');
